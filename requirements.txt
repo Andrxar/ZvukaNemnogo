@@ -1,5 +1,6 @@
 # Минимальный набор зависимостей для работы скрипта TTS в GitHub Actions.
 requests
+beautifulsoup4
 pydub
 ffmpeg-python
 tqdm
