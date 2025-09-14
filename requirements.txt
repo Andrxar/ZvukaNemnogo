@@ -1,0 +1,8 @@
+# Минимальный набор зависимостей для работы скрипта TTS в GitHub Actions.
+requests
+pydub
+ffmpeg-python
+tqdm
+openai-whisper
+numpy
+loguru
