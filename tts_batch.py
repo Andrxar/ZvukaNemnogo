@@ -3,6 +3,7 @@ import sys
 import datetime
 import glob
 import requests
+import re  # <--- ДОБАВЛЕНО для поиска в логах
 from tqdm import tqdm
 from bs4 import BeautifulSoup
 
@@ -19,6 +20,11 @@ TMP_AUDIO_DIR = "tmp_audio"
 MIN_SIZE_KB = 150
 MAX_SIZE_KB = 5000
 AUDIO_SIZE_LIMIT_MB = 450  # максимальный общий размер всех mp3 для одного запуска
+
+# Частота дискретизации (18, 20, 22, 24, 26, 28 kHz)
+# Влияет на качество и размер файла. Чем выше, тем лучше качество и больше размер.
+# 24000 - оптимально для речи.
+SAMPLE_RATE_HZ = 24000 # Значение должно быть одним из: 18000, 20000, 22000, 24000, 26000, 28000
 
 # Голос и характер озвучки
 VOICES_DATA = {
@@ -40,6 +46,7 @@ VIBE_NAME = "Calm (Спокойный)"  # или None
 LOG_FILE = "tts_batch.log"
 
 def log_operation(message):
+    print(message)
     try:
         with open(LOG_FILE, "a", encoding='utf-8') as log_file:
             log_file.write(f"{datetime.datetime.now()} {message}\n")
@@ -47,14 +54,18 @@ def log_operation(message):
         pass
 
 def clean_text_from_fb2(file_path):
+    log_operation(f"Очистка текста из файла FB2: {file_path}")
     with open(file_path, 'r', encoding='utf-8') as file:
         content = file.read()
     soup = BeautifulSoup(content, 'xml')
     text = ' '.join([p.get_text() for p in soup.find_all('p')])
     unwanted_chars = set("{[*+=<>#@\\$&'\"~`/|\\()]}")
-    return ''.join(c for c in text if c not in unwanted_chars)
+    cleaned_text = ''.join(c for c in text if c not in unwanted_chars)
+    log_operation("Очистка текста из FB2 завершена.")
+    return cleaned_text
 
 def split_text_fragments(text, max_length=980):
+    log_operation("Разбивка текста на фрагменты...")
     delimiters = {'.', '!', '?', '...'}
     fragments, start = [], 0
     while start < len(text):
@@ -65,15 +76,19 @@ def split_text_fragments(text, max_length=980):
         if end == start: end = start + max_length
         fragments.append(text[start:end].strip())
         start = end
+    log_operation(f"Текст разбит на {len(fragments)} фрагментов.")
     return fragments
 
 def format_vibe_prompt(vibe_name, vibes_data):
+    log_operation(f"Форматирование промпта для характера: {vibe_name}")
     vibe_content = vibes_data.get(vibe_name)
     if vibe_content:
         return "\n\n".join(vibe_content)
+    log_operation("Характер не найден, используется стандартный промпт.")
     return "Voice Affect: Calm, composed, and reassuring."
 
 def send_request(text, voice, vibe_prompt):
+    log_operation(f"Отправка запроса к API для генерации аудио (голос: {voice}).")
     url = "https://www.openai.fm/api/generate"
     boundary = "----WebKitFormBoundarya027BOtfh6crFn7A"
     headers = {
@@ -97,6 +112,7 @@ def send_request(text, voice, vibe_prompt):
         response.raise_for_status()
         content_type = response.headers.get("Content-Type", "")
         if "audio/wav" in content_type or "audio/mpeg" in content_type:
+            log_operation("Аудио контент успешно получен.")
             return response.content, content_type
         log_operation(f"[LOG] API вернул неверный тип контента: {content_type}")
         return None, None
@@ -105,44 +121,83 @@ def send_request(text, voice, vibe_prompt):
         return None, None
 
 def get_total_size_mb(directory):
+    log_operation(f"Подсчет общего размера файлов в папке: {directory}")
     total = 0
     for f in glob.glob(os.path.join(directory, "*.mp3")):
         total += os.path.getsize(f)
-    return total / (1024 * 1024)
+    total_mb = total / (1024 * 1024)
+    log_operation(f"Общий размер: {total_mb:.2f} МБ.")
+    return total_mb
+
+# =============================================================================
+# НОВАЯ ФУНКЦИЯ ДЛЯ ОПРЕДЕЛЕНИЯ ТОЧКИ ВОЗОБНОВЛЕНИЯ ИЗ ЛОГ-ФАЙЛА
+# =============================================================================
+def get_last_processed_index_from_log(log_file_path):
+    log_operation(f"Поиск точки возобновления в лог-файле: {log_file_path}")
+    last_idx = 0
+    if not os.path.exists(log_file_path):
+        log_operation("Лог-файл не найден. Работа начнется с самого начала.")
+        return 0
+
+    try:
+        with open(log_file_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+        # Ищем последнюю успешную запись с конца файла для скорости
+        for line in reversed(lines):
+            # Ищем строку, подтверждающую, что файл прошел проверку по размеру
+            if "в пределах нормы" in line:
+                # Извлекаем номер из имени файла "part_XXXX.mp3"
+                match = re.search(r"part_(\d+)\.mp3", line)
+                if match:
+                    # Если нашли последнюю успешную часть, например part_42.mp3,
+                    # то функция вернет 42.
+                    # Следующий цикл должен начаться с индекса 42.
+                    last_idx = int(match.group(1))
+                    log_operation(f"Найдена последняя успешная запись для фрагмента {last_idx}. Возобновление со следующего.")
+                    return last_idx
+    except Exception as e:
+        log_operation(f"Ошибка при чтении лог-файла: {e}. Работа начнется с начала.")
+        return 0
+
+    log_operation("В лог-файле не найдено успешных записей. Работа начнется с самого начала.")
+    return 0
+# =============================================================================
 
 def main():
+    log_operation("Начало работы скрипта.")
     if not os.path.isfile(TEXT_FILE_NAME):
         log_operation(f"Файл {TEXT_FILE_NAME} не найден!")
         print(f"Файл {TEXT_FILE_NAME} не найден!")
         sys.exit(1)
 
+    log_operation(f"Создание папок {OUTPUT_MP3_DIR} и {TMP_AUDIO_DIR}, если они не существуют.")
     os.makedirs(OUTPUT_MP3_DIR, exist_ok=True)
     os.makedirs(TMP_AUDIO_DIR, exist_ok=True)
 
     # Чтение и очистка текста
+    log_operation(f"Чтение текста из файла: {TEXT_FILE_NAME}")
     if TEXT_FILE_NAME.lower().endswith(".fb2"):
         text = clean_text_from_fb2(TEXT_FILE_NAME)
     else:
         with open(TEXT_FILE_NAME, "r", encoding="utf-8") as f:
             text = f.read()
+    log_operation("Чтение и очистка текста завершены.")
 
     # Фрагментация текста
     all_chunks = split_text_fragments(text, max_length=980)
-    log_operation(f"Текст разбит на {len(all_chunks)} фрагментов.")
 
-    # Определяем с какого места продолжать
-    existing_mp3 = sorted(glob.glob(os.path.join(OUTPUT_MP3_DIR, "part_*.mp3")))
-    last_idx = 0
-    if existing_mp3:
-        last_file = os.path.basename(existing_mp3[-1])
-        try:
-            last_idx = int(last_file.split("_")[1].split(".")[0])
-        except Exception:
-            last_idx = len(existing_mp3)
+    # =============================================================================
+    # ИЗМЕНЕННЫЙ БЛОК: ОПРЕДЕЛЕНИЕ ТОЧКИ ВОЗОБНОВЛЕНИЯ ИЗ ЛОГА
+    # Старый код, искавший .mp3 файлы, удален.
+    # =============================================================================
+    last_idx = get_last_processed_index_from_log(LOG_FILE)
+    # =============================================================================
 
     vibe_prompt = format_vibe_prompt(VIBE_NAME, VIBES_DATA)
 
     # Основной цикл обработки
+    log_operation("Начало основного цикла обработки фрагментов.")
     for idx in range(last_idx, len(all_chunks)):
         chunk = all_chunks[idx]
         base_name = f"part_{idx+1:04}"
@@ -150,8 +205,7 @@ def main():
         out_mp3 = os.path.join(OUTPUT_MP3_DIR, f"{base_name}.mp3")
 
         log_operation(f"Генерация {base_name}: {len(chunk)} символов.")
-        tqdm.write(f"Генерация {base_name}: {len(chunk)} символов.")
-
+        
         # Запрос к TTS endpoint
         audio_content, content_type = send_request(chunk, VOICE_NAME, vibe_prompt)
         if audio_content is None:
@@ -159,38 +213,51 @@ def main():
             continue
 
         # Сохраняем временный аудиофайл (wav/mp3)
+        log_operation(f"Сохранение временного аудиофайла: {tmp_wav}")
         with open(tmp_wav, "wb") as f:
             f.write(audio_content)
 
         # Конвертируем в mp3 если нужно (только если пришел wav)
         if "wav" in content_type:
+            log_operation(f"Конвертация {tmp_wav} в {out_mp3}...")
             try:
                 from pydub import AudioSegment
                 audio = AudioSegment.from_wav(tmp_wav)
+                if SAMPLE_RATE_HZ and SAMPLE_RATE_HZ in [18000, 20000, 22000, 24000, 26000, 28000]:
+                    log_operation(f"Установка частоты дискретизации: {SAMPLE_RATE_HZ} Hz")
+                    audio = audio.set_frame_rate(SAMPLE_RATE_HZ)
                 audio.export(out_mp3, format="mp3", bitrate="192k")
+                log_operation("Конвертация в mp3 завершена.")
             except Exception as e:
                 log_operation(f"Ошибка конвертации wav->mp3: {e}")
                 continue
         else:
+            log_operation(f"Переименование {tmp_wav} в {out_mp3} (файл уже в mp3).")
             os.rename(tmp_wav, out_mp3)
 
         # Проверяем размер итогового mp3
+        log_operation(f"Проверка размера файла: {out_mp3}")
         size_kb = os.path.getsize(out_mp3) // 1024
         if size_kb < MIN_SIZE_KB or size_kb > MAX_SIZE_KB:
             log_operation(f"Файл {out_mp3} не прошёл по размеру: {size_kb} КБ. Удалён.")
             os.remove(out_mp3)
             continue
+        log_operation(f"Размер файла {size_kb} КБ в пределах нормы.")
 
+        # =============================================================================
+        # ИЗМЕНЕННЫЙ БЛОК: УДАЛЕНА НЕКОРРЕКТНАЯ ИНСТРУКЦИЯ ДЛЯ ПОЛЬЗОВАТЕЛЯ
+        # =============================================================================
         # Проверяем общий размер всех mp3
         total_mb = get_total_size_mb(OUTPUT_MP3_DIR)
-        tqdm.write(f"Текущий общий размер mp3: {total_mb:.2f} МБ")
         if total_mb >= AUDIO_SIZE_LIMIT_MB:
-            log_operation("Достигнут лимит размера. Остановка для ручной выгрузки файлов!")
-            print(f"Достигнут лимит {AUDIO_SIZE_LIMIT_MB} МБ. Скачайте артефакт, удалите все mp3 кроме последнего и перезапустите!")
+            log_operation(f"Достигнут лимит размера {AUDIO_SIZE_LIMIT_MB} МБ. Работа будет остановлена.")
+            print(f"Достигнут лимит размера {AUDIO_SIZE_LIMIT_MB} МБ. Запустите workflow заново для продолжения.")
             break
+        # =============================================================================
 
         # Удаляем временный wav
         if os.path.exists(tmp_wav):
+            log_operation(f"Удаление временного файла: {tmp_wav}")
             os.remove(tmp_wav)
 
     log_operation("Работа завершена!")
@@ -200,4 +267,4 @@ if __name__ == "__main__":
         main()
     except Exception as exc:
         log_operation(f"КРИТИЧЕСКАЯ ОШИБКА: {exc}")
-        sys.exit(1)
+        sys.exit(1)```
