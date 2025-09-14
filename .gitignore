@@ -1,0 +1,4 @@
+output_mp3/
+tmp_audio/
+*.log
+*.zip
