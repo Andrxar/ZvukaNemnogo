@@ -8,7 +8,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Шаг 1: Клонирование репозитория
-      # Этот шаг скачает весь ваш код, включая tts_batch.log из последнего коммита.
+      # Этот шаг скачает весь ваш код, включая tts_batch.log из последнего коммита,
+      # что позволит скрипту возобновить работу.
       - name: Checkout repo
         uses: actions/checkout@v4
 
@@ -31,14 +32,13 @@ jobs:
           sudo apt-get install -y ffmpeg
 
       # Шаг 5: Запуск основного скрипта
-      # Скрипт найдет tts_batch.log (если он есть) и продолжит работу,
-      # а также обновит лог-файл новыми записями.
+      # Используется флаг "-u" (unbuffered), чтобы логи выводились в реальном времени.
       - name: Run TTS batch script
         run: |
-          python tts_batch.py
+          python -u tts_batch.py
 
-      # Шаг 6: Архивирование только MP3-файлов
-      # Лог-файл больше не нужно добавлять в этот архив.
+      # Шаг 6: Архивирование только MP3-файлов для артефакта
+      # Лог-файл больше не добавляется в этот архив.
       - name: Archive mp3 results
         if: always()
         run: |
@@ -54,16 +54,14 @@ jobs:
           name: mp3_results
           path: mp3_results.zip
 
-      # =====================================================================
-      # ШАГ 8 (КЛЮЧЕВОЙ): КОММИТ И PUSH ЛОГ-ФАЙЛА ОБРАТНО В РЕПОЗИТОРИЙ
-      # =====================================================================
+      # Шаг 8: Коммит и push лог-файла обратно в репозиторий для сохранения прогресса
       - name: Commit and push log file
         if: always()
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git add tts_batch.log
-          # Коммитим, только если есть изменения в файле
+          # Коммитим, только если в лог-файле есть изменения
           if ! git diff --staged --quiet; then
             git commit -m "Update tts_batch.log with latest progress"
             git push
