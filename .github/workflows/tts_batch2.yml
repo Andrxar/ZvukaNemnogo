@@ -1,0 +1,65 @@
+name: TTS Batch Synthesis
+
+on:
+  workflow_dispatch:
+
+jobs:
+  synthesize:
+    runs-on: ubuntu-latest
+    steps:
+      # Шаг 1: Клонирование репозитория (скачивает код и tts_batch.log, если он уже есть)
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # Шаг 2: Настройка Python
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      # Шаг 3: Установка зависимостей
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Шаг 4: Установка ffmpeg
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      # Шаг 5: Запуск скрипта (флаг -u для логов)
+      - name: Run TTS batch script
+        run: |
+          python -u tts_batch.py
+
+      # ШАГ 6: УПАКОВКА ТОЛЬКО MP3 ФАЙЛОВ
+      - name: Archive mp3 results
+        if: always()
+        run: |
+          if [ -d "output_mp3" ]; then
+            zip -r mp3_results.zip output_mp3
+          fi
+
+      # ШАГ 7: ЗАГРУЗКА АРХИВА С MP3
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mp3_results
+          path: mp3_results.zip
+
+      # ШАГ 8: СОХРАНЕНИЕ ЛОГА В РЕПОЗИТОРИЙ
+      - name: Commit and push log file
+        if: always()
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add -f tts_batch.log
+          if ! git diff --staged --quiet; then
+            git commit -m "Update tts_batch.log with latest progress"
+            git push
+          else
+            echo "No changes in log file to commit."
+          fi
