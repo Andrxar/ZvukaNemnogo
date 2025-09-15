@@ -13,27 +13,16 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # Шаг 2: Синхронизация с репозиторием
-      - name: Sync with remote repository
-        run: git pull
-
-      # =====================================================================
-      # ШАГ 2.5 (НОВЫЙ): ДИАГНОСТИКА СОСТОЯНИЯ ФАЙЛОВ
-      # Этот шаг покажет нам, существует ли лог-файл и что в нем написано
-      # ПЕРЕД тем, как Python-скрипт его прочитает.
-      # =====================================================================
-      - name: Diagnose File State
+      # Шаг 2: Диагностика (оставляем, он очень полезен)
+      - name: Diagnose File State before script
         run: |
-          echo "--- Checking current directory contents: ---"
-          ls -la
-          echo "--- Checking if tts_batch.log exists and what's inside: ---"
+          echo "--- Checking if tts_batch.log exists BEFORE python script: ---"
           if [ -f "tts_batch.log" ]; then
-            echo "tts_batch.log EXISTS. Printing contents:"
-            cat tts_batch.log
+            cat tts_batch.log | tail -n 5
           else
-            echo "tts_batch.log DOES NOT EXIST at this stage."
+            echo "tts_batch.log does not exist yet."
           fi
-          echo "--- End of diagnosis ---"
+          echo "--- End of initial diagnosis ---"
 
       # Шаг 3: Настройка Python
       - name: Set up Python
@@ -80,6 +69,14 @@ jobs:
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          
+          # =====================================================================
+          # КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ:
+          # Синхронизируемся с сервером ПРЯМО ПЕРЕД тем как делать коммит.
+          # Это решает ошибку "rejected (fetch first)".
+          # =====================================================================
+          git pull
+          
           git add -f tts_batch.log
           if ! git diff --staged --quiet; then
             git commit -m "Update tts_batch.log with latest progress"
