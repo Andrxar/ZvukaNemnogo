@@ -105,7 +105,7 @@ def get_total_size_mb(directory):
     return total_mb
 
 # =============================================================================
-# ИЗМЕНЕННАЯ И БОЛЕЕ НАДЕЖНАЯ ФУНКЦИЯ ДЛЯ ОПРЕДЕЛЕНИЯ ТОЧКИ ВОЗОБНОВЛЕНИЯ
+# ФИНАЛЬНАЯ ВЕРСИЯ ФУНКЦИИ С МАКСИМАЛЬНОЙ ДИАГНОСТИКОЙ
 # =============================================================================
 def get_last_processed_index_from_log(log_file_path):
     log_operation(f"Поиск точки возобновления в лог-файле: {log_file_path}")
@@ -116,32 +116,31 @@ def get_last_processed_index_from_log(log_file_path):
 
     last_successful_index = 0
     target_string = "в пределах нормы"
-    lines_read = 0
-    found_matches = 0
-
+    
     try:
         with open(log_file_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
-        lines_read = len(lines)
+        
+        log_operation(f"ДИАГНОСТИКА: Начинаю проверку {len(lines)} строк из лог-файла...")
 
-        # Ищем последнее совпадение, проходя по файлу с начала до конца
-        for line in lines:
+        for i, line in enumerate(lines):
+            # ВЫВОДИМ КАЖДУЮ СТРОКУ, КОТОРУЮ ПРОВЕРЯЕМ (без лишних пробелов)
+            log_operation(f"  [Строка {i+1}]: {line.strip()}")
+            
             if target_string in line:
+                # ЕСЛИ НАШЛИ СОВПАДЕНИЕ, СООБЩАЕМ ОБ ЭТОМ
+                log_operation(f"    --> СОВПАДЕНИЕ НАЙДЕНО!")
                 match = re.search(r"part_(\d+)\.mp3", line)
                 if match:
-                    # Мы нашли совпадение, запоминаем его номер и продолжаем.
-                    # Это гарантирует, что мы найдем самый последний номер в файле.
-                    last_successful_index = int(match.group(1))
-                    found_matches += 1
+                    current_index = int(match.group(1))
+                    log_operation(f"    --> Извлечен номер: {current_index}")
+                    last_successful_index = current_index
         
-        # После цикла, у нас будет самый последний найденный номер
-        if found_matches > 0:
-            log_operation(f"Диагностика: Прочитано {lines_read} строк. Найдено {found_matches} совпадений.")
-            log_operation(f"Последний успешный фрагмент: {last_successful_index}. Возобновление со следующего.")
+        if last_successful_index > 0:
+            log_operation(f"ДИАГНОСТИКА ЗАВЕРШЕНА: Последний успешный фрагмент: {last_successful_index}. Возобновление со следующего.")
             return last_successful_index
         else:
-            log_operation(f"Диагностика: Прочитано {lines_read} строк, но совпадений с '{target_string}' не найдено.")
-            log_operation("Работа начнется с самого начала.")
+            log_operation("ДИАГНОСТИКА ЗАВЕРШЕНА: Успешных записей не найдено. Работа начнется с самого начала.")
             return 0
 
     except Exception as e:
