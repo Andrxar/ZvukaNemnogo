@@ -6,8 +6,8 @@ on:
 jobs:
   synthesize:
     runs-on: ubuntu-latest
-    permissions:      # <--- ДОБАВИТЬ ЭТОТ БЛОК
-      contents: write   # <--- И ЭТУ СТРОКУ
+    permissions:
+      contents: write
     steps:
       # Шаг 1: Клонирование репозитория (скачивает код и tts_batch.log, если он уже есть)
       - name: Checkout repo
@@ -58,6 +58,13 @@ jobs:
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          
+          # =====================================================================
+          # КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: СНАЧАЛА СКАЧИВАЕМ СВЕЖИЕ ИЗМЕНЕНИЯ
+          # Это решает ошибку "Updates were rejected because the remote contains work that you do not have locally"
+          # =====================================================================
+          git pull
+          
           git add -f tts_batch.log
           if ! git diff --staged --quiet; then
             git commit -m "Update tts_batch.log with latest progress"
