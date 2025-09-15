@@ -3,7 +3,7 @@ import sys
 import datetime
 import glob
 import requests
-import re  # <--- ДОБАВЛЕНО для поиска в логах
+import re
 from tqdm import tqdm
 from bs4 import BeautifulSoup
 
@@ -22,21 +22,11 @@ MAX_SIZE_KB = 5000
 AUDIO_SIZE_LIMIT_MB = 5  # максимальный общий размер всех mp3 для одного запуска
 
 # Частота дискретизации (18, 20, 22, 24, 26, 28 kHz)
-# Влияет на качество и размер файла. Чем выше, тем лучше качество и больше размер.
-# 24000 - оптимально для речи.
 SAMPLE_RATE_HZ = 22000 # Значение должно быть одним из: 18000, 20000, 22000, 24000, 26000, 28000
 
 # Голос и характер озвучки
-VOICES_DATA = {
-    "voices": [
-        "Alloy", "Ash", "Ballad", "Coral", "Echo", "Fable", "Onyx", "Nova", "Sage", "Shimmer", "Verse"
-    ]
-}
-VIBES_DATA = {
-    "Calm (Спокойный)": ["Emotion: Искреннее сочувствие, уверенность.", "Emphasis: Выделите ключевые мысли."],
-    "Energetic (Энергичный)": ["Emotion: Яркий, энергичный тон.", "Emphasis: Выделите эмоциональные слова."],
-    # ... (сокращено, но можно вставить весь справочник)
-}
+VOICES_DATA = { "voices": [ "Alloy", "Ash", "Ballad", "Coral", "Echo", "Fable", "Onyx", "Nova", "Sage", "Shimmer", "Verse" ] }
+VIBES_DATA = { "Calm (Спокойный)": ["Emotion: Искреннее сочувствие, уверенность.", "Emphasis: Выделите ключевые мысли."], "Energetic (Энергичный)": ["Emotion: Яркий, энергичный тон.", "Emphasis: Выделите эмоциональные слова."], }
 
 VOICE_NAME = "Ballad"
 VIBE_NAME = "Energetic (Энергичный)"  # или None
@@ -91,21 +81,8 @@ def send_request(text, voice, vibe_prompt):
     log_operation(f"Отправка запроса к API для генерации аудио (голос: {voice}).")
     url = "https://www.openai.fm/api/generate"
     boundary = "----WebKitFormBoundarya027BOtfh6crFn7A"
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Content-Type": f"multipart/form-data; boundary={boundary}",
-    }
-    data = [
-        f"--{boundary}",
-        f'Content-Disposition: form-data; name="input"\r\n\r\n{text}',
-        f"--{boundary}",
-        f'Content-Disposition: form-data; name="prompt"\r\n\r\n{vibe_prompt}',
-        f"--{boundary}",
-        f'Content-Disposition: form-data; name="voice"\r\n\r\n{voice.lower()}',
-        f"--{boundary}",
-        f'Content-Disposition: form-data; name="vibe"\r\n\r\nnull',
-        f"--{boundary}--"
-    ]
+    headers = { "User-Agent": "Mozilla/5.0", "Content-Type": f"multipart/form-data; boundary={boundary}", }
+    data = [ f"--{boundary}", f'Content-Disposition: form-data; name="input"\r\n\r\n{text}', f"--{boundary}", f'Content-Disposition: form-data; name="prompt"\r\n\r\n{vibe_prompt}', f"--{boundary}", f'Content-Disposition: form-data; name="voice"\r\n\r\n{voice.lower()}', f"--{boundary}", f'Content-Disposition: form-data; name="vibe"\r\n\r\nnull', f"--{boundary}--" ]
     body = "\r\n".join(data).encode('utf-8')
     try:
         response = requests.post(url, headers=headers, data=body, timeout=90)
@@ -122,46 +99,54 @@ def send_request(text, voice, vibe_prompt):
 
 def get_total_size_mb(directory):
     log_operation(f"Подсчет общего размера файлов в папке: {directory}")
-    total = 0
-    for f in glob.glob(os.path.join(directory, "*.mp3")):
-        total += os.path.getsize(f)
+    total = sum(os.path.getsize(f) for f in glob.glob(os.path.join(directory, "*.mp3")))
     total_mb = total / (1024 * 1024)
     log_operation(f"Общий размер: {total_mb:.2f} МБ.")
     return total_mb
 
 # =============================================================================
-# НОВАЯ ФУНКЦИЯ ДЛЯ ОПРЕДЕЛЕНИЯ ТОЧКИ ВОЗОБНОВЛЕНИЯ ИЗ ЛОГ-ФАЙЛА
+# ИЗМЕНЕННАЯ И БОЛЕЕ НАДЕЖНАЯ ФУНКЦИЯ ДЛЯ ОПРЕДЕЛЕНИЯ ТОЧКИ ВОЗОБНОВЛЕНИЯ
 # =============================================================================
 def get_last_processed_index_from_log(log_file_path):
     log_operation(f"Поиск точки возобновления в лог-файле: {log_file_path}")
-    last_idx = 0
+    
     if not os.path.exists(log_file_path):
         log_operation("Лог-файл не найден. Работа начнется с самого начала.")
         return 0
 
+    last_successful_index = 0
+    target_string = "в пределах нормы"
+    lines_read = 0
+    found_matches = 0
+
     try:
         with open(log_file_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
+        lines_read = len(lines)
 
-        # Ищем последнюю успешную запись с конца файла для скорости
-        for line in reversed(lines):
-            # Ищем строку, подтверждающую, что файл прошел проверку по размеру
-            if "в пределах нормы" in line:
-                # Извлекаем номер из имени файла "part_XXXX.mp3"
+        # Ищем последнее совпадение, проходя по файлу с начала до конца
+        for line in lines:
+            if target_string in line:
                 match = re.search(r"part_(\d+)\.mp3", line)
                 if match:
-                    # Если нашли последнюю успешную часть, например part_42.mp3,
-                    # то функция вернет 42.
-                    # Следующий цикл должен начаться с индекса 42.
-                    last_idx = int(match.group(1))
-                    log_operation(f"Найдена последняя успешная запись для фрагмента {last_idx}. Возобновление со следующего.")
-                    return last_idx
-    except Exception as e:
-        log_operation(f"Ошибка при чтении лог-файла: {e}. Работа начнется с начала.")
-        return 0
+                    # Мы нашли совпадение, запоминаем его номер и продолжаем.
+                    # Это гарантирует, что мы найдем самый последний номер в файле.
+                    last_successful_index = int(match.group(1))
+                    found_matches += 1
+        
+        # После цикла, у нас будет самый последний найденный номер
+        if found_matches > 0:
+            log_operation(f"Диагностика: Прочитано {lines_read} строк. Найдено {found_matches} совпадений.")
+            log_operation(f"Последний успешный фрагмент: {last_successful_index}. Возобновление со следующего.")
+            return last_successful_index
+        else:
+            log_operation(f"Диагностика: Прочитано {lines_read} строк, но совпадений с '{target_string}' не найдено.")
+            log_operation("Работа начнется с самого начала.")
+            return 0
 
-    log_operation("В лог-файле не найдено успешных записей. Работа начнется с самого начала.")
-    return 0
+    except Exception as e:
+        log_operation(f"Критическая ошибка при чтении лог-файла: {e}. Работа начнется с начала.")
+        return 0
 # =============================================================================
 
 def main():
@@ -187,13 +172,9 @@ def main():
     # Фрагментация текста
     all_chunks = split_text_fragments(text, max_length=980)
 
-    # =============================================================================
-    # ИЗМЕНЕННЫЙ БЛОК: ОПРЕДЕЛЕНИЕ ТОЧКИ ВОЗОБНОВЛЕНИЯ ИЗ ЛОГА
-    # Старый код, искавший .mp3 файлы, удален.
-    # =============================================================================
+    # Определение точки возобновления из лога
     last_idx = get_last_processed_index_from_log(LOG_FILE)
-    # =============================================================================
-
+    
     vibe_prompt = format_vibe_prompt(VIBE_NAME, VIBES_DATA)
 
     # Основной цикл обработки
@@ -206,18 +187,14 @@ def main():
 
         log_operation(f"Генерация {base_name}: {len(chunk)} символов.")
         
-        # Запрос к TTS endpoint
         audio_content, content_type = send_request(chunk, VOICE_NAME, vibe_prompt)
         if audio_content is None:
             log_operation(f"Ошибка генерации аудио для фрагмента {idx+1}. Пропуск.")
             continue
 
-        # Сохраняем временный аудиофайл (wav/mp3)
-        log_operation(f"Сохранение временного аудиофайла: {tmp_wav}")
         with open(tmp_wav, "wb") as f:
             f.write(audio_content)
 
-        # Конвертируем в mp3 если нужно (только если пришел wav)
         if "wav" in content_type:
             log_operation(f"Конвертация {tmp_wav} в {out_mp3}...")
             try:
@@ -235,7 +212,6 @@ def main():
             log_operation(f"Переименование {tmp_wav} в {out_mp3} (файл уже в mp3).")
             os.rename(tmp_wav, out_mp3)
 
-        # Проверяем размер итогового mp3
         log_operation(f"Проверка размера файла: {out_mp3}")
         size_kb = os.path.getsize(out_mp3) // 1024
         if size_kb < MIN_SIZE_KB or size_kb > MAX_SIZE_KB:
@@ -244,18 +220,12 @@ def main():
             continue
         log_operation(f"Размер файла {size_kb} КБ в пределах нормы.")
 
-        # =============================================================================
-        # ИЗМЕНЕННЫЙ БЛОК: УДАЛЕНА НЕКОРРЕКТНАЯ ИНСТРУКЦИЯ ДЛЯ ПОЛЬЗОВАТЕЛЯ
-        # =============================================================================
-        # Проверяем общий размер всех mp3
         total_mb = get_total_size_mb(OUTPUT_MP3_DIR)
         if total_mb >= AUDIO_SIZE_LIMIT_MB:
             log_operation(f"Достигнут лимит размера {AUDIO_SIZE_LIMIT_MB} МБ. Работа будет остановлена.")
             print(f"Достигнут лимит размера {AUDIO_SIZE_LIMIT_MB} МБ. Запустите workflow заново для продолжения.")
             break
-        # =============================================================================
-
-        # Удаляем временный wav
+        
         if os.path.exists(tmp_wav):
             log_operation(f"Удаление временного файла: {tmp_wav}")
             os.remove(tmp_wav)
