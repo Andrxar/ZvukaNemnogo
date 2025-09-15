@@ -7,7 +7,7 @@ jobs:
   synthesize:
     runs-on: ubuntu-latest
     steps:
-      # Шаг 1: Клонирование репозитория
+      # Шаг 1: Клонирование репозитория (скачивает код и tts_batch.log, если он уже есть)
       - name: Checkout repo
         uses: actions/checkout@v4
 
@@ -29,18 +29,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      # =====================================================================
-      # ШАГ 5 (ИЗМЕНЕН): ДОБАВЛЕНЫ ECHO ДЛЯ ГАРАНТИРОВАННОГО ВЫВОДА
-      # =====================================================================
-      # Команды "echo" выводят текст немедленно и заставят GitHub
-      # создать раскрывающийся лог.
+      # Шаг 5: Запуск скрипта (флаг -u для логов)
       - name: Run TTS batch script
         run: |
-          echo "--- Starting Python script now. Logs should appear below. ---"
           python -u tts_batch.py
-          echo "--- Python script finished. ---"
 
-      # Шаг 6: Архивирование MP3-файлов
+      # ШАГ 6: УПАКОВКА ТОЛЬКО MP3 ФАЙЛОВ
       - name: Archive mp3 results
         if: always()
         run: |
@@ -48,7 +42,7 @@ jobs:
             zip -r mp3_results.zip output_mp3
           fi
 
-      # Шаг 7: Загрузка артефакта с MP3
+      # ШАГ 7: ЗАГРУЗКА АРХИВА С MP3
       - name: Upload artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -56,7 +50,7 @@ jobs:
           name: mp3_results
           path: mp3_results.zip
 
-      # Шаг 8: Коммит и push лог-файла
+      # ШАГ 8: СОХРАНЕНИЕ ЛОГА В РЕПОЗИТОРИЙ
       - name: Commit and push log file
         if: always()
         run: |
