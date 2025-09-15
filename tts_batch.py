@@ -267,4 +267,4 @@ if __name__ == "__main__":
         main()
     except Exception as exc:
         log_operation(f"КРИТИЧЕСКАЯ ОШИБКА: {exc}")
-        sys.exit(1)```
+        sys.exit(1)
