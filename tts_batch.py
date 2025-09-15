@@ -19,7 +19,7 @@ TMP_AUDIO_DIR = "tmp_audio"
 # Проверка размеров mp3
 MIN_SIZE_KB = 150
 MAX_SIZE_KB = 5000
-AUDIO_SIZE_LIMIT_MB = 450  # максимальный общий размер всех mp3 для одного запуска
+AUDIO_SIZE_LIMIT_MB = 20  # максимальный общий размер всех mp3 для одного запуска
 
 # Частота дискретизации (18, 20, 22, 24, 26, 28 kHz)
 # Влияет на качество и размер файла. Чем выше, тем лучше качество и больше размер.
@@ -226,7 +226,7 @@ def main():
                 if SAMPLE_RATE_HZ and SAMPLE_RATE_HZ in [18000, 20000, 22000, 24000, 26000, 28000]:
                     log_operation(f"Установка частоты дискретизации: {SAMPLE_RATE_HZ} Hz")
                     audio = audio.set_frame_rate(SAMPLE_RATE_HZ)
-                audio.export(out_mp3, format="mp3", bitrate="192k")
+                audio.export(out_mp3, format="mp3", bitrate="128k")
                 log_operation("Конвертация в mp3 завершена.")
             except Exception as e:
                 log_operation(f"Ошибка конвертации wav->mp3: {e}")
