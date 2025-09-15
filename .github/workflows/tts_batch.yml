@@ -9,9 +9,16 @@ jobs:
     permissions:
       contents: write
     steps:
-      # Шаг 1: Клонирование репозитория (скачивает код и tts_batch.log, если он уже есть)
+      # Шаг 1: Клонирование репозитория
       - name: Checkout repo
         uses: actions/checkout@v4
+
+      # =====================================================================
+      # ШАГ 1.5 (КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ): СИНХРОНИЗАЦИЯ СРАЗУ ПОСЛЕ КЛОНИРОВАНИЯ
+      # Это гарантирует, что мы получим самый свежий tts_batch.log ПЕРЕД запуском Python
+      # =====================================================================
+      - name: Sync with remote repository
+        run: git pull
 
       # Шаг 2: Настройка Python
       - name: Set up Python
@@ -31,7 +38,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      # Шаг 5: Запуск скрипта (флаг -u для логов)
+      # Шаг 5: Запуск скрипта (теперь он увидит правильный лог)
       - name: Run TTS batch script
         run: |
           python -u tts_batch.py
@@ -58,13 +65,6 @@ jobs:
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          
-          # =====================================================================
-          # КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: СНАЧАЛА СКАЧИВАЕМ СВЕЖИЕ ИЗМЕНЕНИЯ
-          # Это решает ошибку "Updates were rejected because the remote contains work that you do not have locally"
-          # =====================================================================
-          git pull
-          
           git add -f tts_batch.log
           if ! git diff --staged --quiet; then
             git commit -m "Update tts_batch.log with latest progress"
