@@ -6,6 +6,8 @@ on:
 jobs:
   synthesize:
     runs-on: ubuntu-latest
+    permissions:      # <--- ДОБАВИТЬ ЭТОТ БЛОК
+      contents: write   # <--- И ЭТУ СТРОКУ
     steps:
       # Шаг 1: Клонирование репозитория (скачивает код и tts_batch.log, если он уже есть)
       - name: Checkout repo
