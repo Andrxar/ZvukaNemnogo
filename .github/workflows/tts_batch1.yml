@@ -56,7 +56,7 @@ jobs:
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git add tts_batch.log
+          git add -f tts_batch.log
           if ! git diff --staged --quiet; then
             git commit -m "Update tts_batch.log with latest progress"
             git push
