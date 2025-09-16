@@ -1,67 +1,120 @@
 name: TTS Batch Synthesis
 
 on:
+  # Этот воркфлоу можно запустить вручную
   workflow_dispatch:
+  # НОВОЕ: Этот воркфлоу ТАКЖЕ будет запускаться автоматически,
+  # когда другой воркфлоу успешно завершается.
+  workflow_run:
+    workflows: ["TTS Batch Synthesis"]
+    types:
+      - completed
 
 jobs:
   synthesize:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # НОВОЕ: Добавляем разрешение на управление другими воркфлоу
+      actions: write
+
     steps:
       # Шаг 1: Клонирование репозитория
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # Шаг 2: Диагностика (оставляем, он очень полезен)
-      - name: Diagnose File State before script
-        run: |
-          echo "--- Checking if tts_batch.log exists BEFORE python script: ---"
-          if [ -f "tts_batch.log" ]; then
-            cat tts_batch.log | tail -n 5
-          else
-            echo "tts_batch.log does not exist yet."
-          fi
-          echo "--- End of initial diagnosis ---"
+      # =====================================================================
+      # НОВЫЙ ШАГ: АВТОМАТИЧЕСКАЯ ОЧИСТКА СТАРЫХ АРТЕФАКТОВ
+      # Чтобы не превышать лимит в 500 МБ, мы удаляем все артефакты перед началом работы.
+      # =====================================================================
+      - name: Clean up old artifacts
+        uses: geekyeggo/delete-artifact@v5
+        with:
+          # Удаляем ВСЕ артефакты, созданные этим воркфлоу
+          name: mp3_results
+
+      # Шаг 2: Синхронизация с репозиторием
+      - name: Sync with remote repository
+        run: git pull
 
       # Шаг 3: Настройка Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-
+          
       # Шаг 4: Установка зависимостей
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
+          
       # Шаг 5: Установка ffmpeg
       - name: Install ffmpeg
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
-
+          
       # Шаг 6: Запуск скрипта
       - name: Run TTS batch script
+        id: run_script # Даем id, чтобы получить доступ к outputs
         run: |
           python -u tts_batch.py
-
+          
       # Шаг 7: Упаковка артефакта
       - name: Archive mp3 results
+        id: archive
         if: always()
         run: |
-          if [ -d "output_mp3" ]; then
+          if [ -d "output_mp3" ] && [ "$(ls -A output_mp3)" ]; then
             zip -r mp3_results.zip output_mp3
+            echo "created=true" >> $GITHUB_OUTPUT
+          else
+            echo "created=false" >> $GITHUB_OUTPUT
           fi
-
+          
       # Шаг 8: Загрузка артефакта
       - name: Upload artifact
-        if: always()
+        if: steps.archive.outputs.created == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: mp3_results
           path: mp3_results.zip
+          
+      # =====================================================================
+      # НОВЫЙ ШАГ: ВЫГРУЗКА И ПРОВЕРКА В BACKBLAZE B2
+      # =====================================================================
+      - name: Upload and Verify to Backblaze B2
+        id: upload_b2
+        if: steps.archive.outputs.created == 'true'
+        uses: rclone/rclone-action@v1.4
+        with:
+          # Мы выполняем целый скрипт с помощью rclone
+          script: |
+            LOCAL_FILE="mp3_results.zip"
+            BOOK_NAME="${{ steps.run_script.outputs.book_name }}"
+            REMOTE_PATH="B2:${{ secrets.B2_BUCKET }}/${BOOK_NAME}/audio-part-$(date +%Y%m%d-%H%M%S).zip"
+            
+            echo "Uploading ${LOCAL_FILE} to ${REMOTE_PATH}..."
+            rclone copyto "${LOCAL_FILE}" "${REMOTE_PATH}" --progress
+            
+            echo "Verifying upload..."
+            LOCAL_SIZE=$(stat -c%s "${LOCAL_FILE}")
+            REMOTE_SIZE=$(rclone size --json "${REMOTE_PATH}" | grep -o '"bytes":[0-9]*' | awk -F':' '{print $2}')
+            
+            echo "Local size: ${LOCAL_SIZE} bytes"
+            echo "Remote size: ${REMOTE_SIZE} bytes"
+            
+            if [ "${LOCAL_SIZE}" -eq "${REMOTE_SIZE}" ]; then
+              echo "✅ Verification successful: Sizes match!"
+              echo "finished=true" >> $GITHUB_OUTPUT
+            else
+              echo "❌ Verification FAILED: Sizes do not match!"
+              exit 1
+            fi
+          # Передаем ключи для аутентификации
+          B2_ACCOUNT_ID: ${{ secrets.B2_KEY_ID }}
+          B2_ACCOUNT_KEY: ${{ secrets.B2_APPLICATION_KEY }}
 
       # Шаг 9: Сохранение лога
       - name: Commit and push log file
@@ -69,18 +122,19 @@ jobs:
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          
-          # =====================================================================
-          # КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ:
-          # Синхронизируемся с сервером ПРЯМО ПЕРЕД тем как делать коммит.
-          # Это решает ошибку "rejected (fetch first)".
-          # =====================================================================
           git pull
-          
-          git add -f tts_batch.log
+          # Используем динамическое имя лог-файла
+          git add -f "${{ steps.run_script.outputs.log_filename }}"
           if ! git diff --staged --quiet; then
-            git commit -m "Update tts_batch.log with latest progress"
+            git commit -m "Update log for ${{ steps.run_script.outputs.book_name }}"
             git push
           else
             echo "No changes in log file to commit."
           fi
+
+      # =====================================================================
+      # НОВЫЙ ШАГ: ПРОВЕРКА НЕОБХОДИМОСТИ ПЕРЕЗАПУСКА
+      # =====================================================================
+      - name: Check if workflow needs to be re-run
+        if: steps.upload_b2.outputs.finished == 'true'
+        run: echo "Workflow has reached the size limit and will be re-run automatically."
