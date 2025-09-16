@@ -4,7 +4,7 @@ on:
   # Этот воркфлоу можно запустить вручную
   workflow_dispatch:
   # НОВОЕ: Этот воркфлоу ТАКЖЕ будет запускаться автоматически,
-  # когда другой воркфлоу успешно завершается.
+  # когда другой воркфлоу с таким же именем успешно завершается.
   workflow_run:
     workflows: ["TTS Batch Synthesis"]
     types:
@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      # НОВОЕ: Добавляем разрешение на управление другими воркфлоу
+      # НОВОЕ: Добавляем разрешение на управление другими воркфлоу и артефактами
       actions: write
 
     steps:
@@ -30,7 +30,6 @@ jobs:
       - name: Clean up old artifacts
         uses: geekyeggo/delete-artifact@v5
         with:
-          # Удаляем ВСЕ артефакты, созданные этим воркфлоу
           name: mp3_results
 
       # Шаг 2: Синхронизация с репозиторием
@@ -66,6 +65,7 @@ jobs:
         id: archive
         if: always()
         run: |
+          # Архивируем, только если папка не пуста
           if [ -d "output_mp3" ] && [ "$(ls -A output_mp3)" ]; then
             zip -r mp3_results.zip output_mp3
             echo "created=true" >> $GITHUB_OUTPUT
@@ -73,7 +73,7 @@ jobs:
             echo "created=false" >> $GITHUB_OUTPUT
           fi
           
-      # Шаг 8: Загрузка артефакта
+      # Шаг 8: Загрузка артефакта (только если он был создан)
       - name: Upload artifact
         if: steps.archive.outputs.created == 'true'
         uses: actions/upload-artifact@v4
@@ -89,7 +89,6 @@ jobs:
         if: steps.archive.outputs.created == 'true'
         uses: rclone/rclone-action@v1.4
         with:
-          # Мы выполняем целый скрипт с помощью rclone
           script: |
             LOCAL_FILE="mp3_results.zip"
             BOOK_NAME="${{ steps.run_script.outputs.book_name }}"
@@ -100,6 +99,7 @@ jobs:
             
             echo "Verifying upload..."
             LOCAL_SIZE=$(stat -c%s "${LOCAL_FILE}")
+            # Получаем размер удаленного файла и извлекаем только цифры
             REMOTE_SIZE=$(rclone size --json "${REMOTE_PATH}" | grep -o '"bytes":[0-9]*' | awk -F':' '{print $2}')
             
             echo "Local size: ${LOCAL_SIZE} bytes"
@@ -112,7 +112,6 @@ jobs:
               echo "❌ Verification FAILED: Sizes do not match!"
               exit 1
             fi
-          # Передаем ключи для аутентификации
           B2_ACCOUNT_ID: ${{ secrets.B2_KEY_ID }}
           B2_ACCOUNT_KEY: ${{ secrets.B2_APPLICATION_KEY }}
 
@@ -123,7 +122,7 @@ jobs:
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git pull
-          # Используем динамическое имя лог-файла
+          # Используем динамическое имя лог-файла из Python
           git add -f "${{ steps.run_script.outputs.log_filename }}"
           if ! git diff --staged --quiet; then
             git commit -m "Update log for ${{ steps.run_script.outputs.book_name }}"
@@ -134,7 +133,10 @@ jobs:
 
       # =====================================================================
       # НОВЫЙ ШАГ: ПРОВЕРКА НЕОБХОДИМОСТИ ПЕРЕЗАПУСКА
+      # Этот шаг нужен, чтобы триггер workflow_run мог сработать.
+      # Если загрузка была успешной, мы просто выводим сообщение.
+      # Сам перезапуск инициируется событием "workflow_run: completed".
       # =====================================================================
       - name: Check if workflow needs to be re-run
         if: steps.upload_b2.outputs.finished == 'true'
-        run: echo "Workflow has reached the size limit and will be re-run automatically."
+        run: echo "Workflow has reached the size limit and will be re-run automatically by the 'workflow_run' trigger."
