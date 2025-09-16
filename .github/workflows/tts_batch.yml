@@ -74,7 +74,10 @@ jobs:
       # Шаг 10: Выгрузка и проверка в Backblaze B2
       - name: Upload and Verify to Backblaze B2
         if: steps.archive.outputs.created == 'true'
-        uses: rclone/rclone-action@v1.4
+        # =====================================================================
+        # ИЗМЕНЕНИЕ: Указан правильный, рабочий экшен для rclone
+        # =====================================================================
+        uses: wei/rclone-action@v1
         with:
           script: |
             LOCAL_FILE="mp3_results.zip"
@@ -97,8 +100,11 @@ jobs:
               echo "❌ Verification FAILED: Sizes do not match!"
               exit 1
             fi
-          B2_ACCOUNT_ID: ${{ secrets.B2_KEY_ID }}
-          B2_ACCOUNT_KEY: ${{ secrets.B2_APPLICATION_KEY }}
+          # Передаем ключи через переменные окружения, rclone их подхватит
+          env:
+            RCLONE_CONFIG_B2_TYPE: b2
+            RCLONE_CONFIG_B2_ACCOUNT: ${{ secrets.B2_KEY_ID }}
+            RCLONE_CONFIG_B2_KEY: ${{ secrets.B2_APPLICATION_KEY }}
 
       # Шаг 11: Сохранение лога
       - name: Commit and push log file
