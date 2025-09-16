@@ -1,21 +1,15 @@
 name: TTS Batch Synthesis
 
 on:
-  # Этот воркфлоу можно запустить вручную
+  # Воркфлоу запускается ТОЛЬКО вручную.
   workflow_dispatch:
-  # НОВОЕ: Этот воркфлоу ТАКЖЕ будет запускаться автоматически,
-  # когда другой воркфлоу с таким же именем успешно завершается.
-  workflow_run:
-    workflows: ["TTS Batch Synthesis"]
-    types:
-      - completed
 
 jobs:
   synthesize:
     runs-on: ubuntu-latest
     permissions:
+      # Права на запись в репозиторий (для лога) и на управление артефактами
       contents: write
-      # НОВОЕ: Добавляем разрешение на управление другими воркфлоу и артефактами
       actions: write
 
     steps:
@@ -23,49 +17,45 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # =====================================================================
-      # НОВЫЙ ШАГ: АВТОМАТИЧЕСКАЯ ОЧИСТКА СТАРЫХ АРТЕФАКТОВ
-      # Чтобы не превышать лимит в 500 МБ, мы удаляем все артефакты перед началом работы.
-      # =====================================================================
+      # Шаг 2: Автоматическая очистка старых артефактов
       - name: Clean up old artifacts
         uses: geekyeggo/delete-artifact@v5
         with:
           name: mp3_results
 
-      # Шаг 2: Синхронизация с репозиторием
+      # Шаг 3: Синхронизация с репозиторием
       - name: Sync with remote repository
         run: git pull
 
-      # Шаг 3: Настройка Python
+      # Шаг 4: Настройка Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
           
-      # Шаг 4: Установка зависимостей
+      # Шаг 5: Установка зависимостей
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           
-      # Шаг 5: Установка ffmpeg
+      # Шаг 6: Установка ffmpeg
       - name: Install ffmpeg
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
           
-      # Шаг 6: Запуск скрипта
+      # Шаг 7: Запуск скрипта
       - name: Run TTS batch script
-        id: run_script # Даем id, чтобы получить доступ к outputs
+        id: run_script
         run: |
           python -u tts_batch.py
           
-      # Шаг 7: Упаковка артефакта
+      # Шаг 8: Упаковка артефакта
       - name: Archive mp3 results
         id: archive
         if: always()
         run: |
-          # Архивируем, только если папка не пуста
           if [ -d "output_mp3" ] && [ "$(ls -A output_mp3)" ]; then
             zip -r mp3_results.zip output_mp3
             echo "created=true" >> $GITHUB_OUTPUT
@@ -73,7 +63,7 @@ jobs:
             echo "created=false" >> $GITHUB_OUTPUT
           fi
           
-      # Шаг 8: Загрузка артефакта (только если он был создан)
+      # Шаг 9: Загрузка артефакта
       - name: Upload artifact
         if: steps.archive.outputs.created == 'true'
         uses: actions/upload-artifact@v4
@@ -81,11 +71,8 @@ jobs:
           name: mp3_results
           path: mp3_results.zip
           
-      # =====================================================================
-      # НОВЫЙ ШАГ: ВЫГРУЗКА И ПРОВЕРКА В BACKBLAZE B2
-      # =====================================================================
+      # Шаг 10: Выгрузка и проверка в Backblaze B2
       - name: Upload and Verify to Backblaze B2
-        id: upload_b2
         if: steps.archive.outputs.created == 'true'
         uses: rclone/rclone-action@v1.4
         with:
@@ -99,7 +86,6 @@ jobs:
             
             echo "Verifying upload..."
             LOCAL_SIZE=$(stat -c%s "${LOCAL_FILE}")
-            # Получаем размер удаленного файла и извлекаем только цифры
             REMOTE_SIZE=$(rclone size --json "${REMOTE_PATH}" | grep -o '"bytes":[0-9]*' | awk -F':' '{print $2}')
             
             echo "Local size: ${LOCAL_SIZE} bytes"
@@ -107,7 +93,6 @@ jobs:
             
             if [ "${LOCAL_SIZE}" -eq "${REMOTE_SIZE}" ]; then
               echo "✅ Verification successful: Sizes match!"
-              echo "finished=true" >> $GITHUB_OUTPUT
             else
               echo "❌ Verification FAILED: Sizes do not match!"
               exit 1
@@ -115,14 +100,13 @@ jobs:
           B2_ACCOUNT_ID: ${{ secrets.B2_KEY_ID }}
           B2_ACCOUNT_KEY: ${{ secrets.B2_APPLICATION_KEY }}
 
-      # Шаг 9: Сохранение лога
+      # Шаг 11: Сохранение лога
       - name: Commit and push log file
         if: always()
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git pull
-          # Используем динамическое имя лог-файла из Python
           git add -f "${{ steps.run_script.outputs.log_filename }}"
           if ! git diff --staged --quiet; then
             git commit -m "Update log for ${{ steps.run_script.outputs.book_name }}"
@@ -130,13 +114,3 @@ jobs:
           else
             echo "No changes in log file to commit."
           fi
-
-      # =====================================================================
-      # НОВЫЙ ШАГ: ПРОВЕРКА НЕОБХОДИМОСТИ ПЕРЕЗАПУСКА
-      # Этот шаг нужен, чтобы триггер workflow_run мог сработать.
-      # Если загрузка была успешной, мы просто выводим сообщение.
-      # Сам перезапуск инициируется событием "workflow_run: completed".
-      # =====================================================================
-      - name: Check if workflow needs to be re-run
-        if: steps.upload_b2.outputs.finished == 'true'
-        run: echo "Workflow has reached the size limit and will be re-run automatically by the 'workflow_run' trigger."
