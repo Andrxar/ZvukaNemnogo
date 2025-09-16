@@ -74,9 +74,6 @@ jobs:
       # Шаг 10: Выгрузка и проверка в Backblaze B2
       - name: Upload and Verify to Backblaze B2
         if: steps.archive.outputs.created == 'true'
-        # =====================================================================
-        # ИЗМЕНЕНИЕ: Указан правильный, рабочий экшен для rclone
-        # =====================================================================
         uses: wei/rclone-action@v1
         with:
           script: |
@@ -100,11 +97,13 @@ jobs:
               echo "❌ Verification FAILED: Sizes do not match!"
               exit 1
             fi
-          # Передаем ключи через переменные окружения, rclone их подхватит
-          env:
-            RCLONE_CONFIG_B2_TYPE: b2
-            RCLONE_CONFIG_B2_ACCOUNT: ${{ secrets.B2_KEY_ID }}
-            RCLONE_CONFIG_B2_KEY: ${{ secrets.B2_APPLICATION_KEY }}
+        # =====================================================================
+        # ИСПРАВЛЕНИЕ: Блок 'env' перенесен на правильный уровень вложенности
+        # =====================================================================
+        env:
+          RCLONE_CONFIG_B2_TYPE: b2
+          RCLONE_CONFIG_B2_ACCOUNT: ${{ secrets.B2_KEY_ID }}
+          RCLONE_CONFIG_B2_KEY: ${{ secrets.B2_APPLICATION_KEY }}
 
       # Шаг 11: Сохранение лога
       - name: Commit and push log file
