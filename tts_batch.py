@@ -35,6 +35,7 @@ SAMPLE_RATE_HZ = 22000
 # --- Настройки голоса и интонации ---
 VOICES_DATA = { "voices": [ "Alloy", "Ash", "Ballad", "Coral", "Echo", "Fable", "Onyx", "Nova", "Sage", "Shimmer", "Verse" ] }
 VIBES_DATA = { "Calm (Спокойный)": ["Emotion: Искреннее сочувствие, уверенность.", "Emphasis: Выделите ключевые мысли."], "Energetic (Энергичный)": ["Emotion: Яркий, энергичный тон.", "Emphasis: Выделите эмоциональные слова."], }
+
 VOICE_NAME = "Ballad"
 VIBE_NAME = "Energetic (Энергичный)"
 
