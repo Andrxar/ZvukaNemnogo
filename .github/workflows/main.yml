@@ -1,0 +1,122 @@
+name: TTS Batch Synthesis
+
+on:
+  # Воркфлоу запускается ТОЛЬКО вручную.
+  workflow_dispatch:
+
+jobs:
+  synthesize:
+    runs-on: ubuntu-latest
+    permissions:
+      # Права на запись в репозиторий (для лога) и на управление артефактами
+      contents: write
+      actions: write
+
+    steps:
+      # Шаг 1: Клонирование репозитория
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # Шаг 2: Автоматическая очистка старых артефактов
+      - name: Clean up old artifacts
+        uses: geekyeggo/delete-artifact@v5
+        with:
+          name: mp3_results
+
+      # Шаг 3: Синхронизация с репозиторием
+      - name: Sync with remote repository
+        run: git pull
+
+      # Шаг 4: Настройка Python
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          
+      # Шаг 5: Установка зависимостей
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          
+      # Шаг 6: Установка ffmpeg
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          
+      # Шаг 7: Запуск скрипта
+      - name: Run TTS batch script
+        id: run_script
+        run: |
+          python -u tts_batch.py
+          
+      # Шаг 8: Упаковка артефакта
+      - name: Archive mp3 results
+        id: archive
+        if: always()
+        run: |
+          if [ -d "output_mp3" ] && [ "$(ls -A output_mp3)" ]; then
+            zip -r mp3_results.zip output_mp3
+            echo "created=true" >> $GITHUB_OUTPUT
+          else
+            echo "created=false" >> $GITHUB_OUTPUT
+          fi
+          
+      # Шаг 9: Загрузка артефакта
+      - name: Upload artifact
+        if: steps.archive.outputs.created == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mp3_results
+          path: mp3_results.zip
+          
+      # Шаг 10: Выгрузка и проверка в Backblaze B2
+      - name: Upload and Verify to Backblaze B2
+        if: steps.archive.outputs.created == 'true'
+        # =====================================================================
+        # ИЗМЕНЕНИЕ: Указан правильный, рабочий экшен для rclone
+        # =====================================================================
+        uses: wei/rclone-action@v1
+        with:
+          script: |
+            LOCAL_FILE="mp3_results.zip"
+            BOOK_NAME="${{ steps.run_script.outputs.book_name }}"
+            REMOTE_PATH="B2:${{ secrets.B2_BUCKET }}/${BOOK_NAME}/audio-part-$(date +%Y%m%d-%H%M%S).zip"
+            
+            echo "Uploading ${LOCAL_FILE} to ${REMOTE_PATH}..."
+            rclone copyto "${LOCAL_FILE}" "${REMOTE_PATH}" --progress
+            
+            echo "Verifying upload..."
+            LOCAL_SIZE=$(stat -c%s "${LOCAL_FILE}")
+            REMOTE_SIZE=$(rclone size --json "${REMOTE_PATH}" | grep -o '"bytes":[0-9]*' | awk -F':' '{print $2}')
+            
+            echo "Local size: ${LOCAL_SIZE} bytes"
+            echo "Remote size: ${REMOTE_SIZE} bytes"
+            
+            if [ "${LOCAL_SIZE}" -eq "${REMOTE_SIZE}" ]; then
+              echo "✅ Verification successful: Sizes match!"
+            else
+              echo "❌ Verification FAILED: Sizes do not match!"
+              exit 1
+            fi
+          # Передаем ключи через переменные окружения, rclone их подхватит
+          env:
+            RCLONE_CONFIG_B2_TYPE: b2
+            RCLONE_CONFIG_B2_ACCOUNT: ${{ secrets.B2_KEY_ID }}
+            RCLONE_CONFIG_B2_KEY: ${{ secrets.B2_APPLICATION_KEY }}
+
+      # Шаг 11: Сохранение лога
+      - name: Commit and push log file
+        if: always()
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git pull
+          git add -f "${{ steps.run_script.outputs.log_filename }}"
+          if ! git diff --staged --quiet; then
+            git commit -m "Update log for ${{ steps.run_script.outputs.book_name }}"
+            git push
+          else
+            echo "No changes in log file to commit."
+          fi
