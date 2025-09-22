@@ -83,29 +83,44 @@ jobs:
             echo "No changes in log file to commit."
           fi
 
-      - name: Delete uploaded artifact from GitHub if B2 upload succeeded
+      - name: Delete uploaded artifact from GitHub if B2 upload succeeded (safe check)
         if: always() && hashFiles('.b2_upload_ok.json') != ''
         run: |
-          echo "Found .b2_upload_ok.json — attempt to delete artifact 'mp3_results' from this repo"
+          echo "Found .b2_upload_ok.json — attempt to delete matching artifact 'mp3_results' from this repo"
           cat .b2_upload_ok.json || true
-          OWNER="${{ github.repository_owner }}"
-          REPO="${{ github.event.repository.name || github.repository }}"
-          resp=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/${OWNER}/${REPO}/actions/artifacts")
-          echo "$resp" > artifacts_list.json
-          artifact_id=$(echo "$resp" | jq '.artifacts[] | select(.name=="mp3_results") | .id' | head -n1)
-          if [ -z "$artifact_id" ] || [ "$artifact_id" = "null" ]; then
-            echo "Artifact 'mp3_results' not found in repo artifacts list. Nothing to delete."
+
+          # extract local_size from marker
+          LOCAL_SIZE=$(jq -r '.local_size' .b2_upload_ok.json || echo "")
+          if [ -z "$LOCAL_SIZE" ] || [ "$LOCAL_SIZE" = "null" ]; then
+            echo "No local_size in marker, aborting artifact deletion."
             exit 0
           fi
+
+          OWNER="${{ github.repository_owner }}"
+          REPO="${{ github.event.repository.name || github.repository }}"
+
+          # get artifacts list
+          resp=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/${OWNER}/${REPO}/actions/artifacts")
+          echo "$resp" > artifacts_list.json
+
+          # find artifact whose size matches local_size from marker
+          artifact_id=$(echo "$resp" | jq -r --argjson s "$LOCAL_SIZE" '.artifacts[] | select(.size_in_bytes == $s) | .id' | head -n1)
+
+          if [ -z "$artifact_id" ] || [ "$artifact_id" = "null" ]; then
+            echo "No artifact found matching size $LOCAL_SIZE. Nothing to delete."
+            exit 0
+          fi
+
           echo "Artifact id to delete: $artifact_id"
           delete_resp=$(curl -s -X DELETE -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/${OWNER}/${REPO}/actions/artifacts/${artifact_id}")
           echo "Delete response: $delete_resp"
+
           status=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/${OWNER}/${REPO}/actions/artifacts/${artifact_id}")
-          if [ "$status" = "404" ]; then
-            echo "Artifact deleted successfully."
+          if [ "$status" = "204" ] || [ "$status" = "404" ]; then
+            echo "Artifact deleted successfully (HTTP $status)."
             rm -f .b2_upload_ok.json || true
           else
-            echo "⚠️ Artifact deletion may have failed, HTTP status: $status"
+            echo "Artifact deletion may have failed, HTTP status: $status"
             echo "Continuing workflow anyway (not critical)."
           fi
 
