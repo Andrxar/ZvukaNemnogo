@@ -8,13 +8,13 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      actions: write   # нужно write, чтобы уметь удалять артефакты
+      actions: write
     env:
       # Передаём B2 credentials из Secrets в окружение runner-а
       B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
       B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
       B2_BUCKET_ID: ${{ secrets.B2_BUCKET_ID }}
-      B2_BUCKET_NAME: ${{ secrets.B2_BUCKET_NAME }} # опционально
+      B2_BUCKET_NAME: ${{ secrets.B2_BUCKET_NAME }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -107,6 +107,7 @@ jobs:
           else
             echo "⚠️ Artifact deletion may have failed, HTTP status: $status"
             echo "Continuing workflow anyway (not critical)."
+          fi
 
       - name: Cleanup old artifacts (older than 1 day)
         if: always()
@@ -127,7 +128,6 @@ jobs:
               id=$(echo "$artifact" | jq -r '.id')
               name=$(echo "$artifact" | jq -r '.name')
               created=$(echo "$artifact" | jq -r '.created_at')
-              # Считаем возраст (в секундах)
               age_sec=$(( $(date +%s) - $(date -d "$created" +%s) ))
               if [ "$age_sec" -gt 86400 ]; then
                 echo "Deleting old artifact: $name (id=$id, created=$created)"
