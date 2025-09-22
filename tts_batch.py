@@ -9,6 +9,7 @@
 # - загрузку на Backblaze B2
 # - автоматическое создание отдельного лог-файла для каждой книги
 # - запись также в общий tts_batch.log для совместимости с workflow
+# - финальная выгрузка остатка (если остались файлы после основного цикла)
 
 import os
 import sys
@@ -66,7 +67,7 @@ GLOBAL_LOG_FILE = "tts_batch.log"
 # Файл-маркер для успешной заливки на B2
 B2_MARKER_FILE = ".b2_upload_ok.json"
 
-# Имя zip архива с результатами
+# Имя zip архива с результатами (временное имя, удаляется после upload)
 ZIP_FILE_NAME = "mp3_results.zip"
 
 # ================== ФУНКЦИИ ==================
@@ -76,7 +77,6 @@ def log_to_file(message):
     Записывает message с меткой времени в:
      - персональный лог (LOG_FILE)
      - общий лог (GLOBAL_LOG_FILE)
-    Это гарантирует, что workflow, который коммитит tts_batch.log, увидит прогресс.
     """
     ts = f"{datetime.datetime.now()} {message}\n"
     try:
@@ -163,10 +163,6 @@ def get_total_size_mb(directory):
     return total / (1024 * 1024)
 
 def get_last_processed_index_from_log(log_file_path):
-    """
-    Считывает лог-файл и возвращает последний номер успешно записанного фрагмента.
-    Ищет строки с ключевой фразой "в пределах нормы" и извлекает part_XXXX.mp3.
-    """
     if not os.path.exists(log_file_path):
         return 0
     last_successful_index = 0
@@ -185,7 +181,6 @@ def get_last_processed_index_from_log(log_file_path):
         return 0
 
 def get_highest_part_index_on_disk():
-    """Возвращает максимальный номер part_XXXX.mp3 в OUTPUT_MP3_DIR (0 если нет файлов)."""
     parts = glob.glob(os.path.join(OUTPUT_MP3_DIR, "part_*.mp3"))
     max_idx = 0
     for p in parts:
@@ -203,7 +198,6 @@ def compute_sha1_of_file(path):
     return sha1.hexdigest()
 
 def zip_output_mp3(zip_name=ZIP_FILE_NAME):
-    """Упаковать все mp3 из OUTPUT_MP3_DIR в zip_name и вернуть (zip_name, size_bytes)."""
     with zipfile.ZipFile(zip_name, "w", zipfile.ZIP_DEFLATED) as zf:
         for root, _, files in os.walk(OUTPUT_MP3_DIR):
             for f in files:
@@ -328,7 +322,6 @@ def main():
                 audio.export(out_mp3, format="mp3", bitrate=MP3_BITRATE)
             except Exception as e:
                 log_to_file(f"Ошибка конвертации wav->mp3 для {base_name}: {e}")
-                # удаляем временный wav и продолжаем
                 if os.path.exists(tmp_wav):
                     os.remove(tmp_wav)
                 continue
@@ -409,12 +402,10 @@ def main():
                 except Exception as e:
                     log_to_file(f"Ошибка при удалении локальных mp3 после загрузки: {e}")
 
-                # После очистки папки продолжим генерировать следующие фрагменты (цикл не прерывается)
-
             except Exception as e:
                 log_to_file(f"Ошибка при заливке на B2: {e}")
                 # в случае ошибки — оставляем mp3 и zip (zip если остался) чтобы workflow мог отправить их в артефакт
-                # (не удаляем local mp3) — пользователь может вручную просмотреть причину
+                # (не удаляем local mp3)
             # конец блока обработки загрузки
 
         # Удаляем временный WAV файл
@@ -423,6 +414,54 @@ def main():
                 os.remove(tmp_wav)
             except Exception:
                 pass
+
+    # ---------- ФИНАЛ: залить остаток (если остался) ----------
+    remaining = glob.glob(os.path.join(OUTPUT_MP3_DIR, "*.mp3"))
+    if remaining:
+        log_to_file(f"По завершении цикла обнаружено {len(remaining)} mp3-файлов. Попытка финальной упаковки и загрузки в B2.")
+        zip_path, zip_size = zip_output_mp3()
+        log_to_file(f"Создан финальный архив {zip_path}, размер {zip_size} байт.")
+        highest_part = get_highest_part_index_on_disk()
+
+        key_id = os.environ.get("B2_KEY_ID")
+        app_key = os.environ.get("B2_APP_KEY")
+        bucket_id = os.environ.get("B2_BUCKET_ID")
+        bucket_name = os.environ.get("B2_BUCKET_NAME", "tts-archive")
+
+        try:
+            if not all([key_id, app_key, bucket_id]):
+                raise RuntimeError("B2 credentials or bucket id not set in environment variables.")
+            upload_result = upload_zip_to_b2_and_verify(zip_path, bucket_id, bucket_name, key_id, app_key)
+
+            marker = {
+                "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+                "zip": os.path.basename(zip_path),
+                "local_size": upload_result["local_size"],
+                "remote_size": upload_result["remote_size"],
+                "remote_name": upload_result["remote_name"],
+                "fileId": upload_result["fileId"],
+                "last_part": highest_part
+            }
+            with open(B2_MARKER_FILE, "w", encoding="utf-8") as mf:
+                json.dump(marker, mf)
+            log_to_file(f"B2: Финальная загрузка успешна {marker['zip']} (last_part={highest_part}). Маркер {B2_MARKER_FILE} создан.")
+
+            # удаляем локальный zip и mp3
+            try:
+                os.remove(zip_path)
+            except Exception:
+                pass
+            deleted_count = 0
+            for fpath in glob.glob(os.path.join(OUTPUT_MP3_DIR, "*.mp3")):
+                try:
+                    os.remove(fpath)
+                    deleted_count += 1
+                except Exception:
+                    pass
+            log_to_file(f"Удалено {deleted_count} mp3-файлов из {OUTPUT_MP3_DIR} после финальной загрузки.")
+        except Exception as e:
+            log_to_file(f"Ошибка при финальной заливке на B2: {e}")
+            log_to_file("Оставляю финальный zip/mp3 в каталоге, чтобы workflow мог экспортировать их в артефакт.")
 
     print("Все фрагменты обработаны.")
     log_to_file("Все фрагменты обработаны.")
