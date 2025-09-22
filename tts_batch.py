@@ -1,30 +1,34 @@
-# (весь ваш прежний код остаётся тот же до момента проверки общего лимита)
-# Я привожу модифицированный файл целиком для удобства — изменения отмечены комментариями.
-
+# tts_batch.py
 import os
 import sys
 import datetime
 import glob
 import requests
 import re
+import zipfile
+import hashlib
+import json
 from tqdm import tqdm
 from bs4 import BeautifulSoup
 
-# ============================
-# НАСТРОЙКИ ПОЛЬЗОВАТЕЛЯ (как у вас)
-# ============================
+# ================== НАСТРОЙКИ ПОЛЬЗОВАТЕЛЯ (как у вас) ==================
 TEXT_FILE_NAME = "Royzman_Delo-306-Volk-Vor-nevidimka.txt"
 OUTPUT_MP3_DIR = "output_mp3"
 TMP_AUDIO_DIR = "tmp_audio"
 MIN_SIZE_KB = 150
 MAX_SIZE_KB = 5000
-AUDIO_SIZE_LIMIT_MB = 5
+AUDIO_SIZE_LIMIT_MB = 5  # <-- порог в МБ (как у вас)
 SAMPLE_RATE_HZ = 22000
 VOICES_DATA = { "voices": [ "Alloy", "Ash", "Ballad", "Coral", "Echo", "Fable", "Onyx", "Nova", "Sage", "Shimmer", "Verse" ] }
 VIBES_DATA = { "Calm (Спокойный)": ["Emotion: Искреннее сочувствие, уверенность.", "Emphasis: Выделите ключевые мысли."], "Energetic (Энергичный)": ["Emotion: Яркий, энергичный тон.", "Emphasis: Выделите эмоциональные слова."], }
 VOICE_NAME = "Ballad"
 VIBE_NAME = "Energetic (Энергичный)"
 LOG_FILE = "tts_batch.log"
+# ======================================================================
+
+# --- ФАЙЛ-МАРКЕР ДЛЯ WORKFLOW, ЧТО B2 ЗАЛИТИЕ УСПЕШНО ---
+B2_MARKER_FILE = ".b2_upload_ok.json"
+ZIP_FILE_NAME = "mp3_results.zip"
 
 def log_to_file(message):
     try:
@@ -33,6 +37,7 @@ def log_to_file(message):
     except Exception:
         pass
 
+# ---------- ВАШИ СТАРЫЕ ФУНКЦИИ (clean_text_from_fb2, split_text_fragments, ...) ----------
 def clean_text_from_fb2(file_path):
     print(f"Очистка текста из файла FB2: {file_path}")
     with open(file_path, 'r', encoding='utf-8') as file:
@@ -118,6 +123,91 @@ def get_last_processed_index_from_log(log_file_path):
         print(f"Критическая ошибка при чтении лог-файла: {e}. Работа начнется с начала.")
         return 0
 
+# ---------- НОВЫЕ УТИЛИТЫ ДЛЯ B2 ----------
+def compute_sha1_of_file(path):
+    """Возвращает hex SHA1 файла (строку) — требуется Backblaze."""
+    sha1 = hashlib.sha1()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024*1024), b""):
+            sha1.update(chunk)
+    return sha1.hexdigest()
+
+def zip_output_mp3(zip_name=ZIP_FILE_NAME):
+    """Упаковать output_mp3 в zip_name. Возвращает путь и размер файла в байтах."""
+    print(f"Упаковываем каталог {OUTPUT_MP3_DIR} → {zip_name}")
+    with zipfile.ZipFile(zip_name, "w", zipfile.ZIP_DEFLATED) as zf:
+        for root, _, files in os.walk(OUTPUT_MP3_DIR):
+            for f in files:
+                zf.write(os.path.join(root, f), arcname=os.path.join(os.path.relpath(root, OUTPUT_MP3_DIR), f))
+    size = os.path.getsize(zip_name)
+    print(f"Создан {zip_name}, размер {size} байт.")
+    return zip_name, size
+
+def b2_authorize(key_id, app_key):
+    """
+    Авторизация в Backblaze B2.
+    Возвращает dict с apiUrl, authorizationToken, accountId.
+    """
+    print("B2: Авторизация...")
+    resp = requests.get("https://api.backblazeb2.com/b2api/v2/b2_authorize_account", auth=(key_id, app_key), timeout=30)
+    resp.raise_for_status()
+    return resp.json()
+
+def b2_get_upload_url(api_url, auth_token, bucket_id):
+    """
+    Получить uploadUrl и uploadAuthToken для указанного bucketId.
+    """
+    url = api_url.rstrip("/") + "/b2api/v2/b2_get_upload_url"
+    headers = {"Authorization": auth_token}
+    payload = {"bucketId": bucket_id}
+    resp = requests.post(url, headers=headers, json=payload, timeout=30)
+    resp.raise_for_status()
+    return resp.json()
+
+def b2_upload_file_to_bucket(upload_url, upload_auth_token, local_file_path, remote_file_name):
+    """
+    Загружает файл на предоставленный upload_url.
+    Возвращает JSON ответа b2_upload_file (включая fileId, contentLength и т.д.)
+    """
+    print(f"B2: Upload {local_file_path} -> {remote_file_name}")
+    size = os.path.getsize(local_file_path)
+    sha1 = compute_sha1_of_file(local_file_path)
+    headers = {
+        "Authorization": upload_auth_token,
+        "X-Bz-File-Name": remote_file_name,
+        "Content-Type": "application/zip",
+        "Content-Length": str(size),
+        "X-Bz-Content-Sha1": sha1
+    }
+    with open(local_file_path, "rb") as f:
+        resp = requests.post(upload_url, headers=headers, data=f, timeout=300)
+    resp.raise_for_status()
+    return resp.json()
+
+def upload_zip_to_b2_and_verify(zip_path, bucket_id, bucket_name, key_id, app_key):
+    """
+    Полный flow: authorize -> get_upload_url -> upload -> verify по contentLength -> return dict or raise.
+    """
+    auth = b2_authorize(key_id, app_key)
+    api_url = auth["apiUrl"]
+    auth_token = auth["authorizationToken"]
+    upload_info = b2_get_upload_url(api_url, auth_token, bucket_id)
+    upload_url = upload_info["uploadUrl"]
+    upload_auth_token = upload_info["authorizationToken"]
+
+    remote_name = f"{bucket_name}-{os.path.basename(zip_path)}"
+    result = b2_upload_file_to_bucket(upload_url, upload_auth_token, zip_path, remote_name)
+
+    # contentLength в ответе — хранит размер загруженного объекта
+    remote_size = int(result.get("contentLength", 0))
+    local_size = os.path.getsize(zip_path)
+    fileId = result.get("fileId")
+    if local_size != remote_size:
+        raise RuntimeError(f"B2 verification failed: local {local_size} != remote {remote_size}")
+    print("B2: verification OK (size matches).")
+    return {"fileId": fileId, "remote_name": remote_name, "local_size": local_size, "remote_size": remote_size}
+
+# ---------- ПРИВЯЗКА К ОСНОВНОМУ ЦИКЛУ ----------
 def main():
     print("Начало работы скрипта.")
     log_to_file("Начало работы скрипта.")
@@ -127,7 +217,6 @@ def main():
         log_to_file(f"Файл {TEXT_FILE_NAME} не найден!")
         sys.exit(1)
 
-    print(f"Создание папок {OUTPUT_MP3_DIR} и {TMP_AUDIO_DIR}, если они не существуют.")
     os.makedirs(OUTPUT_MP3_DIR, exist_ok=True)
     os.makedirs(TMP_AUDIO_DIR, exist_ok=True)
 
@@ -140,6 +229,7 @@ def main():
     print("Чтение и очистка текста завершены.")
 
     all_chunks = split_text_fragments(text, max_length=980)
+
     last_idx = get_last_processed_index_from_log(LOG_FILE)
     vibe_prompt = format_vibe_prompt(VIBE_NAME, VIBES_DATA)
 
@@ -181,15 +271,51 @@ def main():
 
         log_to_file(f"Размер файла {out_mp3} {size_kb} КБ в пределах нормы.")
 
+        # ===== ПРОВЕРКА ОБЩЕГО ЛИМИТА =====
         total_mb = get_total_size_mb(OUTPUT_MP3_DIR)
-        # <<< CHANGED: при достижении лимита завершаем работу со специальным кодом 2
         if total_mb >= AUDIO_SIZE_LIMIT_MB:
-            msg = f"Достигнут лимит размера {AUDIO_SIZE_LIMIT_MB} МБ. Остановка для архивации."
-            print(msg)
-            log_to_file(msg)
-            # выход с кодом 2 — сигнал workflow, что нужно упаковать/загрузить/удалить артефакт
-            sys.exit(2)
-        # <<< end CHANGED
+            print(f"Достигнут лимит размера {AUDIO_SIZE_LIMIT_MB} МБ. Работа будет остановлена и произведена выгрузка архива на B2.")
+            # --- 1) создаём zip ---
+            zip_path, zip_size = zip_output_mp3()
+
+            # --- 2) пытаемся залить на Backblaze B2 ---
+            # читаем ключи из переменных среды (они должны приходить в runner из Secrets)
+            key_id = os.environ.get("B2_KEY_ID")
+            app_key = os.environ.get("B2_APP_KEY")
+            bucket_id = os.environ.get("B2_BUCKET_ID")
+            bucket_name = os.environ.get("B2_BUCKET_NAME", "tts-archive")
+
+            try:
+                if not all([key_id, app_key, bucket_id]):
+                    raise RuntimeError("B2 credentials or bucket id not set in environment variables.")
+
+                upload_result = upload_zip_to_b2_and_verify(zip_path, bucket_id, bucket_name, key_id, app_key)
+
+                # --- 3) если успешно — создаём маркер для workflow ---
+                marker = {
+                    "timestamp": datetime.datetime.utcnow().isoformat()+"Z",
+                    "zip": os.path.basename(zip_path),
+                    "local_size": upload_result["local_size"],
+                    "remote_size": upload_result["remote_size"],
+                    "remote_name": upload_result["remote_name"],
+                    "fileId": upload_result["fileId"]
+                }
+                with open(B2_MARKER_FILE, "w", encoding="utf-8") as mf:
+                    json.dump(marker, mf)
+                print(f"B2: Успешно загружено и проверено. Создан маркер {B2_MARKER_FILE}")
+
+                # --- 4) (опционально) удаляем локальный zip чтобы runner не отправил его в артефакт по ошибке ---
+                try:
+                    os.remove(zip_path)
+                    print("Локальный zip удалён после успешной загрузки на B2.")
+                except Exception:
+                    pass
+
+            except Exception as e:
+                print(f"Ошибка при заливке на B2: {e}")
+                log_to_file(f"Ошибка при заливке на B2: {e}")
+                # В случае провала — оставляем zip, чтобы workflow мог отправить его в артефакты
+            break  # останавливаем основной цикл, как и раньше
 
         if os.path.exists(tmp_wav):
             os.remove(tmp_wav)
@@ -200,14 +326,6 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except SystemExit as se:
-        # если мы вышли с кодом 2 — передаём его дальше
-        if isinstance(se.code, int):
-            raise
-        else:
-            print(f"КРИТИЧЕСКАЯ ОШИБКА: {se}")
-            log_to_file(f"КРИТИЧЕСКАЯ ОШИБКА: {se}")
-            sys.exit(1)
     except Exception as exc:
         print(f"КРИТИЧЕСКАЯ ОШИБКА: {exc}")
         log_to_file(f"КРИТИЧЕСКАЯ ОШИБКА: {exc}")
