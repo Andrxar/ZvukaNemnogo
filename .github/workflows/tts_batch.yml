@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      actions: read
+      actions: write   # нужно write, чтобы уметь удалять артефакты
     env:
       # Передаём B2 credentials из Secrets в окружение runner-а
       B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
@@ -105,6 +105,37 @@ jobs:
             echo "Artifact deleted successfully."
             rm -f .b2_upload_ok.json || true
           else
-            echo "Artifact deletion may have failed, HTTP status: $status"
-            exit 1
-          fi
+            echo "⚠️ Artifact deletion may have failed, HTTP status: $status"
+            echo "Continuing workflow anyway (not critical)."
+
+      - name: Cleanup old artifacts (older than 1 day)
+        if: always()
+        run: |
+          echo "Cleaning up old artifacts (older than 1 day)…"
+          OWNER="${{ github.repository_owner }}"
+          REPO="${{ github.event.repository.name || github.repository }}"
+          page=1
+          while true; do
+            resp=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                        -H "Accept: application/vnd.github+json" \
+                        "https://api.github.com/repos/${OWNER}/${REPO}/actions/artifacts?per_page=100&page=$page")
+            count=$(echo "$resp" | jq '.artifacts | length')
+            if [ "$count" -eq 0 ]; then
+              break
+            fi
+            echo "$resp" | jq -c '.artifacts[]' | while read -r artifact; do
+              id=$(echo "$artifact" | jq -r '.id')
+              name=$(echo "$artifact" | jq -r '.name')
+              created=$(echo "$artifact" | jq -r '.created_at')
+              # Считаем возраст (в секундах)
+              age_sec=$(( $(date +%s) - $(date -d "$created" +%s) ))
+              if [ "$age_sec" -gt 86400 ]; then
+                echo "Deleting old artifact: $name (id=$id, created=$created)"
+                curl -s -X DELETE -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                     -H "Accept: application/vnd.github+json" \
+                     "https://api.github.com/repos/${OWNER}/${REPO}/actions/artifacts/${id}" || true
+              fi
+            done
+            page=$((page+1))
+          done
+          echo "Old artifacts cleanup complete."
