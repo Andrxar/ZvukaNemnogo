@@ -8,9 +8,13 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      actions: write
-      packages: write
-
+      actions: read
+    env:
+      # Передаём B2 credentials из Secrets в окружение runner-а
+      B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+      B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
+      B2_BUCKET_ID: ${{ secrets.B2_BUCKET_ID }}
+      B2_BUCKET_NAME: ${{ secrets.B2_BUCKET_NAME }} # опционально
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -19,7 +23,7 @@ jobs:
         run: |
           echo "--- Checking if tts_batch.log exists BEFORE python script: ---"
           if [ -f "tts_batch.log" ]; then
-            cat tts_batch.log | tail -n 5
+            tail -n 5 tts_batch.log || true
           else
             echo "tts_batch.log does not exist yet."
           fi
@@ -34,204 +38,80 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install requests
 
       - name: Install ffmpeg
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      # --- Основной шаг: цикл запуска скрипта / архив / upload-to-B2 / delete-artifact ---
-      - name: Run TTS loop with Backblaze upload
-        env:
-          BACKBLAZE_KEY_ID: ${{ secrets.BACKBLAZE_KEY_ID }}
-          BACKBLAZE_APP_KEY: ${{ secrets.BACKBLAZE_APP_KEY }}
-          BACKBLAZE_BUCKET_NAME: ${{ secrets.BACKBLAZE_BUCKET_NAME }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
+      - name: Run TTS batch script
+        id: run_tts
         run: |
-          set -o pipefail
-          set -e
+          python -u tts_batch.py || true
 
-          # Если нужно больше вывода — раскомментируйте
-          # set -x
-
-          # вспомогательная функция - upload to Backblaze B2 (python snippet)
-          upload_to_b2() {
-            if [ ! -f "mp3_results.zip" ]; then
-              echo "mp3_results.zip not found, skipping upload."
-              return 1
-            fi
-
-            python - <<'PY'
-import os, sys, json, requests
-
-key = os.getenv("BACKBLAZE_KEY_ID")
-app = os.getenv("BACKBLAZE_APP_KEY")
-bucket_name = os.getenv("BACKBLAZE_BUCKET_NAME", "tts-artifacts")
-
-if not key or not app:
-    print("Backblaze credentials not provided.")
-    sys.exit(2)
-
-# 1) authorize
-auth = requests.get("https://api.backblazeb2.com/b2api/v2/b2_authorize_account", auth=(key, app))
-if auth.status_code != 200:
-    print("B2 authorize failed:", auth.text)
-    sys.exit(3)
-authj = auth.json()
-apiUrl = authj["apiUrl"]
-authToken = authj["authorizationToken"]
-accountId = authj["accountId"]
-
-# 2) find or create bucket
-r = requests.post(apiUrl + "/b2api/v2/b2_list_buckets", headers={"Authorization": authToken}, json={"accountId": accountId})
-rj = r.json()
-buckets = rj.get("buckets", [])
-bucketId = None
-for b in buckets:
-    if b.get("bucketName") == bucket_name:
-        bucketId = b.get("bucketId")
-        break
-
-if not bucketId:
-    print("Bucket not found, creating bucket:", bucket_name)
-    r = requests.post(apiUrl + "/b2api/v2/b2_create_bucket", headers={"Authorization": authToken}, json={"accountId": accountId, "bucketName": bucket_name, "bucketType": "allPrivate"})
-    if r.status_code != 200:
-        print("Failed create bucket:", r.text)
-        sys.exit(4)
-    bucketId = r.json()["bucketId"]
-
-# 3) get upload url
-r = requests.post(apiUrl + "/b2api/v2/b2_get_upload_url", headers={"Authorization": authToken}, json={"bucketId": bucketId})
-if r.status_code != 200:
-    print("Failed get_upload_url:", r.text)
-    sys.exit(5)
-upj = r.json()
-uploadUrl = upj["uploadUrl"]
-uploadAuth = upj["authorizationToken"]
-
-# 4) upload file
-fname = "mp3_results.zip"
-with open(fname, "rb") as fh:
-    data = fh.read()
-
-headers = {
-    "Authorization": uploadAuth,
-    "X-Bz-File-Name": fname,
-    "Content-Type": "application/zip",
-    "X-Bz-Content-Sha1": "do_not_verify"
-}
-r = requests.post(uploadUrl, headers=headers, data=data)
-if r.status_code != 200:
-    print("Upload failed:", r.status_code, r.text)
-    sys.exit(6)
-upload_resp = r.json()
-fileId = upload_resp.get("fileId")
-if not fileId:
-    print("No fileId in upload response:", upload_resp)
-    sys.exit(7)
-
-# 5) verify file by fetching file info
-r = requests.post(apiUrl + "/b2api/v2/b2_get_file_info", headers={"Authorization": authToken}, json={"fileId": fileId})
-if r.status_code != 200:
-    print("b2_get_file_info failed:", r.text)
-    sys.exit(8)
-info = r.json()
-remote_size = int(info.get("size", -1))
-local_size = os.path.getsize(fname)
-print("Local size:", local_size, "Remote size:", remote_size)
-if local_size != remote_size:
-    print("Size mismatch - upload corrupted.")
-    sys.exit(9)
-
-print("Upload to Backblaze succeeded and verified.")
-sys.exit(0)
-PY
-            return $?
-          }
-
-          # основной цикл: запускаем tts_batch.py и реагируем на код 2 (limit reached)
-          while true; do
-            echo "Starting tts_batch.py..."
-            python -u tts_batch.py || RC=$? && true
-            RC=${RC:-0}
-            echo "tts_batch.py returned code: $RC"
-            if [ "$RC" -eq 2 ]; then
-              echo "Limit reached -> creating zip and uploading to Backblaze..."
-              if [ -d "output_mp3" ]; then
-                rm -f mp3_results.zip
-                zip -r mp3_results.zip output_mp3
-              else
-                echo "No output_mp3 folder found; nothing to zip."
-              fi
-
-              # загружаем на B2
-              upload_to_b2
-              UP_RC=$?
-              if [ "$UP_RC" -ne 0 ]; then
-                echo "Backblaze upload failed (code $UP_RC). Failing the job."
-                exit $UP_RC
-              fi
-
-              # после успешной загрузки — удаляем ARTIFACTы на GitHub (если есть)
-              echo "Searching for GitHub Actions artifact named 'mp3_results' to delete (if exists)..."
-              repo="${GITHUB_REPOSITORY}"
-              token="${GITHUB_TOKEN}"
-              if [ -z "$token" ]; then
-                echo "GITHUB_TOKEN not available; cannot delete artifacts automatically."
-              else
-                ART_LIST=$(curl -s -H "Authorization: token ${token}" "https://api.github.com/repos/${repo}/actions/artifacts")
-                ART_ID=$(echo "$ART_LIST" | python -c "import sys, json
-d=json.load(sys.stdin)
-arts=d.get('artifacts',[])
-for a in arts:
-    if a.get('name')=='mp3_results':
-        print(a.get('id'))
-        break")
-                if [ -n "$ART_ID" ]; then
-                  echo "Deleting artifact id $ART_ID ..."
-                  curl -s -X DELETE -H "Authorization: token ${token}" "https://api.github.com/repos/${repo}/actions/artifacts/${ART_ID}"
-                  echo "Requested deletion of artifact $ART_ID."
-                else
-                  echo "No artifact named 'mp3_results' found."
-                fi
-              fi
-
-              # очистка локальной zip (чтобы не перепутать в следующем цикле)
-              rm -f mp3_results.zip
-
-              # и продолжаем цикл — tts_batch.py будет запущен снова
-              echo "Continuing loop to resume synthesis..."
-              # очистим RC и повторим
-              unset RC
-              continue
-            elif [ "$RC" -eq 0 ]; then
-              echo "tts_batch.py finished normally (exit 0) — synthesis complete."
-              break
-            else
-              echo "tts_batch.py exited with unexpected code $RC — aborting job."
-              exit $RC
-            fi
-          done
-
-      - name: Final artifact (optionally upload final results)
+      # Если скрипт оставил локальный zip (например, B2 не сработал), используем его.
+      - name: Archive mp3 results (only if zip missing)
         if: always()
         run: |
-          # В конце можно создать финальный архив и загрузить как артефакт Actions (если нужно)
-          if [ -d "output_mp3" ]; then
-            rm -f final_mp3_results.zip
-            zip -r final_mp3_results.zip output_mp3
-            echo "Final archive created: final_mp3_results.zip"
-            # Если вы хотите, чтобы этот файл был доступен как артефакт Actions,
-            # можно использовать actions/upload-artifact в отдельном шаге. (ниже — пример)
+          if [ -f "mp3_results.zip" ]; then
+            echo "mp3_results.zip already exists (left by script)."
           else
-            echo "No output_mp3 found at final step."
+            if [ -d "output_mp3" ]; then
+              zip -r mp3_results.zip output_mp3
+            else
+              echo "No output_mp3 dir found, nothing to zip."
+            fi
           fi
 
-      - name: Upload final artifact to GitHub Actions (optional)
+      - name: Upload artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: final_mp3_results
-          path: final_mp3_results.zip
+          name: mp3_results
+          path: mp3_results.zip
+
+      # Сохраняем лог в репо
+      - name: Commit and push log file
+        if: always()
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git pull --rebase || true
+          git add -f tts_batch.log || true
+          if ! git diff --staged --quiet; then
+            git commit -m "Update tts_batch.log with latest progress" || true
+            git push || true
+          else
+            echo "No changes in log file to commit."
+          fi
+
+      # ---- Если B2 upload успех — удалить артефакт из GitHub (чтобы не хранить дубликат) ----
+      - name: Delete uploaded artifact from GitHub if B2 upload succeeded
+        if: always() && (exists('.b2_upload_ok.json'))
+        run: |
+          echo "Found .b2_upload_ok.json — attempt to delete artifact 'mp3_results' from this repo"
+          cat .b2_upload_ok.json || true
+          OWNER="${{ github.repository_owner }}"
+          REPO="${{ github.event.repository.name || github.repository.split('/')[1] }}"
+          # Получаем список артефактов
+          resp=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/${OWNER}/${REPO}/actions/artifacts")
+          echo "$resp" > artifacts_list.json
+          artifact_id=$(echo "$resp" | jq '.artifacts[] | select(.name=="mp3_results") | .id' | head -n1)
+          if [ -z "$artifact_id" ] || [ "$artifact_id" = "null" ]; then
+            echo "Artifact 'mp3_results' not found in repo artifacts list. Nothing to delete."
+            exit 0
+          fi
+          echo "Artifact id to delete: $artifact_id"
+          # DELETE artifact
+          delete_resp=$(curl -s -X DELETE -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/${OWNER}/${REPO}/actions/artifacts/${artifact_id}")
+          echo "Delete response: $delete_resp"
+          # Проверка: попробуем получить info о файле — если 404, значит удалено
+          status=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/${OWNER}/${REPO}/actions/artifacts/${artifact_id}")
+          if [ "$status" = "404" ]; then
+            echo "Artifact deleted successfully."
+            # можно также удалить .b2_upload_ok.json чтобы не повторять
+            rm -f .b2_upload_ok.json || true
+          else
+            echo "Artifact deletion may have failed, HTTP status: $status"
+            exit 1
+          fi
