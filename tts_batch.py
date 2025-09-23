@@ -39,13 +39,13 @@ MIN_SIZE_KB = 150
 MAX_SIZE_KB = 5000
 
 # Лимит общей папки mp3 перед сборкой zip (в МБ)
-AUDIO_SIZE_LIMIT_MB = 450
+AUDIO_SIZE_LIMIT_MB = 20
 
 # Частота дискретизации аудио при конвертации (Гц)
-SAMPLE_RATE_HZ = 20000
+SAMPLE_RATE_HZ = 22000
 
 # Битрейт MP3 при конвертации из WAV (например: "64k", "96k", "128k")
-MP3_BITRATE = "96k"
+MP3_BITRATE = "128k"
 
 # Голоса и характер озвучки (можно расширять)
 VOICES_DATA = { "voices": [ "Alloy", "Ash", "Ballad", "Coral", "Echo", "Fable", "Onyx", "Nova", "Sage", "Shimmer", "Verse" ] }
