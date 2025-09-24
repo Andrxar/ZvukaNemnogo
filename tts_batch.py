@@ -26,7 +26,7 @@ from bs4 import BeautifulSoup
 # ================== НАСТРОЙКИ ПОЛЬЗОВАТЕЛЯ ==================
 
 # Название исходного текстового файла (может быть .txt или .fb2)
-TEXT_FILE_NAME = "Royzman_Delo-Volk-Vor-nevidimka.txt"
+TEXT_FILE_NAME = "111Royzman_Delo-Volk-Vor-nevidimka.txt"
 
 # Папка для готовых mp3 файлов
 OUTPUT_MP3_DIR = "output_mp3"
