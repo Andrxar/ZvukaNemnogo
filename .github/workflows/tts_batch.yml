@@ -75,9 +75,16 @@ jobs:
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git pull --rebase || true
-          git add -f tts_batch.log || true
+          # Ищем наиболее свежий глобальный лог, соответствующий формату tts_batch(<bookname>).log
+          # Если ничего не найдено — fallback к legacy tts_batch.log (чтобы не поломать старый процесс).
+          LOG_FILE=$(ls -1t tts_batch\(*\).log 2>/dev/null | head -n1)
+          if [ -z "$LOG_FILE" ]; then
+            LOG_FILE="tts_batch.log"
+          fi
+          echo "Committing log file: $LOG_FILE"
+          git add -f "$LOG_FILE" || true
           if ! git diff --staged --quiet; then
-            git commit -m "Update tts_batch.log with latest progress" || true
+            git commit -m "Update $LOG_FILE with latest progress" || true
             git push || true
           else
             echo "No changes in log file to commit."
