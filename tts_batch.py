@@ -59,10 +59,36 @@ VOICE_NAME = "Sage"
 VIBE_NAME = "Energetic (Энергичный)"
 
 # ----------------- ЛОГ-ФАЙЛЫ -----------------
-# Персональный лог по имени книги (например Royzman_Delo-306-Volk-Vor-nevidimka.log)
-LOG_FILE = os.path.splitext(os.path.basename(TEXT_FILE_NAME))[0] + ".log"
-# Общий лог, который коммитит workflow (не менять имя, если workflow ожидает tts_batch.log)
-GLOBAL_LOG_FILE = "tts_batch.log"
+# Персональный лог по имени книги (например Royzman_Delo-Volk-Vor-nevidimka.log)
+# (оставляем как в исходном коде)
+BOOK_BASENAME = os.path.splitext(os.path.basename(TEXT_FILE_NAME))[0]
+LOG_FILE = BOOK_BASENAME + ".log"
+
+# Глобальный лог теперь формируется с именем, указывающим книгу:
+# tts_batch(<bookname>).log — это убирает пересечения между разными книгами.
+# Кроме того, чтобы НЕ подхватить старый лог по ошибке, реализуем проверку:
+def resolve_global_log_file(book_basename):
+    """
+    Возвращает наиболее подходящий глобальный лог для текущей книги.
+    1) Если существует точный файл "tts_batch(book).log" — возвращаем его.
+    2) Иначе ищем все файлы, начинающиеся с "tts_batch(book" и выбираем самый новый по времени изменения.
+    3) Если ничего не найдено — возвращаем стандартное имя (оно будет создано при записи).
+    Это обеспечивает, что при обращении к "глобальному" логу мы возьмём файл, относящийся к текущей книге
+    и предпочтём самый свежий вариант.
+    """
+    exact = f"tts_batch({book_basename}).log"
+    if os.path.exists(exact):
+        return exact
+    # Ищем похожие (например могли быть суффиксы/вариации). Выбираем самый свежий.
+    candidates = glob.glob(f"tts_batch({book_basename}*.log")
+    if candidates:
+        candidates.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+        return candidates[0]
+    # fallback — тот же формат, даже если файла ещё нет (будет создан).
+    return exact
+
+# Получаем глобальный лог, подходящий для текущей книги
+GLOBAL_LOG_FILE = resolve_global_log_file(BOOK_BASENAME)
 
 # Файл-маркер для успешной заливки на B2
 B2_MARKER_FILE = ".b2_upload_ok.json"
@@ -76,7 +102,7 @@ def log_to_file(message):
     """
     Записывает message с меткой времени в:
      - персональный лог (LOG_FILE)
-     - общий лог (GLOBAL_LOG_FILE)
+     - общий лог (GLOBAL_LOG_FILE) — теперь уникальный для книги
     """
     ts = f"{datetime.datetime.now()} {message}\n"
     try:
@@ -85,6 +111,7 @@ def log_to_file(message):
     except Exception:
         pass
     try:
+        # При каждой записи используем текущий resolved GLOBAL_LOG_FILE
         with open(GLOBAL_LOG_FILE, "a", encoding='utf-8') as f:
             f.write(ts)
     except Exception:
@@ -97,7 +124,7 @@ def clean_text_from_fb2(file_path):
         content = file.read()
     soup = BeautifulSoup(content, 'xml')
     text = ' '.join([p.get_text() for p in soup.find_all('p')])
-    unwanted_chars = set("{[*+=<>#@\\$&'\"~`/|\\()]}")
+    unwanted_chars = set("{[*+=<>#@\\$&'\"~`/|\\()]}") 
     cleaned_text = ''.join(c for c in text if c not in unwanted_chars)
     print("Очистка текста из FB2 завершена.")
     return cleaned_text
@@ -283,6 +310,8 @@ def main():
     all_chunks = split_text_fragments(text, max_length=980)
 
     # Определяем последний обработанный фрагмент:
+    # Обязательно проверяем персональный лог по книге и только глобальный лог,
+    # относящийся к текущей книге (GLOBAL_LOG_FILE), чтобы не подхватить чужой/старый лог.
     last_idx_book = get_last_processed_index_from_log(LOG_FILE)
     last_idx_global = get_last_processed_index_from_log(GLOBAL_LOG_FILE)
     last_idx = max(last_idx_book, last_idx_global)
