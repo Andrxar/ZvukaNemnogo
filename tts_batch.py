@@ -39,7 +39,7 @@ MIN_SIZE_KB = 150
 MAX_SIZE_KB = 5000
 
 # Лимит общей папки mp3 перед сборкой zip (в МБ)
-AUDIO_SIZE_LIMIT_MB = 20
+AUDIO_SIZE_LIMIT_MB = 5
 
 # Частота дискретизации аудио при конвертации (Гц)
 SAMPLE_RATE_HZ = 22000
