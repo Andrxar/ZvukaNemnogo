@@ -270,7 +270,9 @@ def b2_upload_file_to_bucket(upload_url, upload_auth_token, local_file_path, rem
 def upload_zip_to_b2_and_verify(zip_path, bucket_id, bucket_name, key_id, app_key):
     auth = b2_authorize(key_id, app_key)
     upload_info = b2_get_upload_url(auth["apiUrl"], auth["authorizationToken"], bucket_id)
-    remote_name = f"{bucket_name}-{os.path.basename(zip_path)}"
+    #remote_name = f"{bucket_name}-{os.path.basename(zip_path)}"
+    today = datetime.date.today().isoformat()
+    remote_name = f"{BOOK_BASENAME}/{today}/{os.path.basename(zip_path)}"
     result = b2_upload_file_to_bucket(
         upload_info["uploadUrl"],
         upload_info["authorizationToken"],
