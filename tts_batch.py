@@ -20,6 +20,7 @@ import re
 import zipfile
 import hashlib
 import json
+import time
 from tqdm import tqdm
 from bs4 import BeautifulSoup
 
@@ -48,7 +49,7 @@ SAMPLE_RATE_HZ = 24000
 MP3_BITRATE = "128k"
 
 # Голоса и характер озвучки (можно расширять)
-VOICES_DATA = { "voices": [ "Alloy", "Ash", "Ballad", "Coral", "Echo", "Fable", "Onyx", "Nova", "Sage", "Shimmer", "Verse" ] }
+VOICES_DATA = {"voices": ["Alloy", "Ash", "Ballad", "Coral", "Echo", "Fable", "Onyx", "Nova", "Sage", "Shimmer", "Verse"]}
 VIBES_DATA = {
     "Calm (Спокойный)": ["Emotion: Искреннее сочувствие, уверенность.", "Emphasis: Выделите ключевые мысли."],
     "Energetic (Энергичный)": ["Emotion: Яркий, энергичный тон.", "Emphasis: Выделите эмоциональные слова."],
@@ -58,23 +59,20 @@ VIBES_DATA = {
 VOICE_NAME = "Shimmer"
 VIBE_NAME = "Energetic (Энергичный)"
 
+# Параметры повторов (можно переопределить через окружение)
+DEFAULT_RETRY_ATTEMPTS = int(os.environ.get("RETRY_ATTEMPTS", "20"))
+DEFAULT_RETRY_DELAY = int(os.environ.get("RETRY_DELAY_SEC", "10"))
+
 # ----------------- ЛОГ-ФАЙЛЫ -----------------
-# Персональный лог по имени книги (например Royzman_Delo-Volk-Vor-nevidimka.log)
-# (оставляем как в исходном коде)
 BOOK_BASENAME = os.path.splitext(os.path.basename(TEXT_FILE_NAME))[0]
 LOG_FILE = BOOK_BASENAME + ".log"
 
-# Глобальный лог теперь формируется с именем, указывающим книгу:
-# tts_batch(<bookname>).log — это убирает пересечения между разными книгами.
-# Кроме того, чтобы НЕ подхватить старый лог по ошибке, реализуем проверку:
 def resolve_global_log_file(book_basename):
     """
     Возвращает наиболее подходящий глобальный лог для текущей книги.
     1) Если существует точный файл "tts_batch(book).log" — возвращаем его.
     2) Иначе ищем все файлы, начинающиеся с "tts_batch(book" и выбираем самый новый по времени изменения.
     3) Если ничего не найдено — возвращаем стандартное имя (оно будет создано при записи).
-    Это обеспечивает, что при обращении к "глобальному" логу мы возьмём файл, относящийся к текущей книге
-    и предпочтём самый свежий вариант.
     """
     exact = f"tts_batch({book_basename}).log"
     if os.path.exists(exact):
@@ -87,7 +85,6 @@ def resolve_global_log_file(book_basename):
     # fallback — тот же формат, даже если файла ещё нет (будет создан).
     return exact
 
-# Получаем глобальный лог, подходящий для текущей книги
 GLOBAL_LOG_FILE = resolve_global_log_file(BOOK_BASENAME)
 
 # Файл-маркер для успешной заливки на B2
@@ -111,7 +108,6 @@ def log_to_file(message):
     except Exception:
         pass
     try:
-        # При каждой записи используем текущий resolved GLOBAL_LOG_FILE
         with open(GLOBAL_LOG_FILE, "a", encoding='utf-8') as f:
             f.write(ts)
     except Exception:
@@ -155,9 +151,12 @@ def format_vibe_prompt(vibe_name, vibes_data):
     print("Характер не найден, используется стандартный промпт.")
     return "Voice Affect: Calm, composed, and reassuring."
 
-# ------------------- API TTS -------------------
-def send_request(text, voice, vibe_prompt):
-    print(f"Отправка запроса к API для генерации аудио (голос: {voice}).")
+# ------------------- API TTS (низкоуровневый запрос) -------------------
+def send_request(text, voice, vibe_prompt, timeout=90):
+    """
+    Низкоуровневый single-shot запрос к API.
+    Возвращает (bytes, content_type) или возбуждает исключение.
+    """
     url = "https://www.openai.fm/api/generate"
     boundary = "----WebKitFormBoundarya027BOtfh6crFn7A"
     headers = {
@@ -172,17 +171,39 @@ def send_request(text, voice, vibe_prompt):
         f"--{boundary}--"
     ]
     body = "\r\n".join(data).encode('utf-8')
-    try:
-        response = requests.post(url, headers=headers, data=body, timeout=90)
-        response.raise_for_status()
-        content_type = response.headers.get("Content-Type", "")
-        if "audio/wav" in content_type or "audio/mpeg" in content_type:
-            return response.content, content_type
-        log_to_file(f"[LOG] API вернул неверный тип контента: {content_type}")
-        return None, None
-    except Exception as e:
-        log_to_file(f"[LOG] Сетевая ошибка при запросе к API: {e}")
-        return None, None
+    resp = requests.post(url, headers=headers, data=body, timeout=timeout)
+    resp.raise_for_status()
+    content_type = resp.headers.get("Content-Type", "")
+    return resp.content, content_type
+
+# ------------------- Обёртка с повторами -------------------
+def generate_audio_with_retries(text, voice, vibe_prompt, max_attempts=DEFAULT_RETRY_ATTEMPTS, delay=DEFAULT_RETRY_DELAY):
+    """
+    Попытки выполнить send_request до max_attempts c паузой delay (сек) между попытками.
+    Если по завершении попыток не получилось — возвращает (None, None) и сохраняет текст фрагмента в OUTPUT_MP3_DIR как .txt.
+    """
+    last_err = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            log_to_file(f"[RETRY] Попытка {attempt}/{max_attempts} генерации аудио...")
+            audio_bytes, content_type = send_request(text, voice, vibe_prompt)
+            # Проверяем content_type — только аудио принимаем как успех
+            if content_type and ("audio" in content_type.lower()):
+                log_to_file(f"[RETRY] Успех на попытке {attempt} (content_type={content_type}).")
+                return audio_bytes, content_type
+            else:
+                last_err = f"Неверный Content-Type: {content_type}"
+                log_to_file(f"[RETRY] Попытка {attempt} вернула некорректный Content-Type: {content_type}")
+        except Exception as e:
+            last_err = str(e)
+            log_to_file(f"[RETRY] Попытка {attempt} — ошибка: {e}")
+        # если не последний — ждем и повторяем
+        if attempt < max_attempts:
+            log_to_file(f"[RETRY] Ждём {delay} секунд перед очередной попыткой...")
+            time.sleep(delay)
+    # если дошли сюда — всё не удалось
+    log_to_file(f"[RETRY] Все {max_attempts} попыток завершились неудачей. Ошибка: {last_err}")
+    return None, None
 
 # ------------------- Размеры и индексы -------------------
 def get_total_size_mb(directory):
@@ -270,8 +291,6 @@ def b2_upload_file_to_bucket(upload_url, upload_auth_token, local_file_path, rem
 def upload_zip_to_b2_and_verify(zip_path, bucket_id, bucket_name, key_id, app_key):
     auth = b2_authorize(key_id, app_key)
     upload_info = b2_get_upload_url(auth["apiUrl"], auth["authorizationToken"], bucket_id)
-    # remote_name = f"{bucket_name}-{os.path.basename(zip_path)}"
-    # today = datetime.date.today().isoformat()
     remote_name = f"{BOOK_BASENAME}/{os.path.basename(zip_path)}"
     result = b2_upload_file_to_bucket(
         upload_info["uploadUrl"],
@@ -312,8 +331,6 @@ def main():
     all_chunks = split_text_fragments(text, max_length=980)
 
     # Определяем последний обработанный фрагмент:
-    # Обязательно проверяем персональный лог по книге и только глобальный лог,
-    # относящийся к текущей книге (GLOBAL_LOG_FILE), чтобы не подхватить чужой/старый лог.
     last_idx_book = get_last_processed_index_from_log(LOG_FILE)
     last_idx_global = get_last_processed_index_from_log(GLOBAL_LOG_FILE)
     last_idx = max(last_idx_book, last_idx_global)
@@ -326,39 +343,59 @@ def main():
 
     vibe_prompt = format_vibe_prompt(VIBE_NAME, VIBES_DATA)
 
+    retry_attempts = int(os.environ.get("RETRY_ATTEMPTS", DEFAULT_RETRY_ATTEMPTS))
+    retry_delay = int(os.environ.get("RETRY_DELAY_SEC", DEFAULT_RETRY_DELAY))
+
     # Основной цикл генерации аудио
     for idx in range(last_idx, len(all_chunks)):
         chunk = all_chunks[idx]
         base_name = f"part_{idx+1:04}"
         tmp_wav = os.path.join(TMP_AUDIO_DIR, f"{base_name}.wav")
         out_mp3 = os.path.join(OUTPUT_MP3_DIR, f"{base_name}.mp3")
+        out_txt = os.path.join(OUTPUT_MP3_DIR, f"{base_name}.txt")
 
         print(f"Генерация {base_name}: {len(chunk)} символов.")
-        audio_content, content_type = send_request(chunk, VOICE_NAME, vibe_prompt)
+        audio_content, content_type = generate_audio_with_retries(chunk, VOICE_NAME, vibe_prompt, max_attempts=retry_attempts, delay=retry_delay)
+
         if audio_content is None:
-            log_to_file(f"Ошибка генерации аудио для фрагмента {idx+1}. Пропуск.")
+            # ничего не получилось — сохраняем текст фрагмента в OUTPUT_MP3_DIR с именем part_XXXX.txt
+            try:
+                with open(out_txt, "w", encoding="utf-8") as tf:
+                    tf.write(chunk)
+                log_to_file(f"Фрагмент {idx+1} не озвучен — сохранён как текст {out_txt}. Продолжаем.")
+            except Exception as e:
+                log_to_file(f"Не удалось сохранить текстовый файл для фрагмента {idx+1}: {e}")
             continue
 
-        # Сохраняем WAV
-        with open(tmp_wav, "wb") as f:
-            f.write(audio_content)
-
-        # Конвертация WAV в MP3
-        if "wav" in content_type:
-            try:
-                from pydub import AudioSegment
-                audio = AudioSegment.from_wav(tmp_wav)
-                if SAMPLE_RATE_HZ:
-                    audio = audio.set_frame_rate(SAMPLE_RATE_HZ)
-                audio.export(out_mp3, format="mp3", bitrate=MP3_BITRATE)
-            except Exception as e:
-                log_to_file(f"Ошибка конвертации wav->mp3 для {base_name}: {e}")
-                if os.path.exists(tmp_wav):
-                    os.remove(tmp_wav)
+        # Сохранение и конвертация в зависимости от Content-Type
+        try:
+            ctype = content_type.lower() if content_type else ""
+            if "wav" in ctype:
+                with open(tmp_wav, "wb") as f:
+                    f.write(audio_content)
+                # Конвертация WAV -> MP3
+                try:
+                    from pydub import AudioSegment
+                    audio = AudioSegment.from_wav(tmp_wav)
+                    if SAMPLE_RATE_HZ:
+                        audio = audio.set_frame_rate(SAMPLE_RATE_HZ)
+                    audio.export(out_mp3, format="mp3", bitrate=MP3_BITRATE)
+                except Exception as e:
+                    log_to_file(f"Ошибка конвертации wav->mp3 для {base_name}: {e}")
+                    if os.path.exists(tmp_wav):
+                        os.remove(tmp_wav)
+                    continue
+            elif "mpeg" in ctype or "mp3" in ctype or "audio/mpeg" in ctype:
+                # API вернул mp3 — сохраняем сразу
+                with open(out_mp3, "wb") as f:
+                    f.write(audio_content)
+            else:
+                # Неподдерживаемый тип — лог и пропуск (хотя generate_audio_with_retries должен был это отфильтровать)
+                log_to_file(f"[LOG] Неподдерживаемый Content-Type для {base_name}: {content_type}. Пропуск.")
                 continue
-        else:
-            # если API сразу вернул mp3
-            os.rename(tmp_wav, out_mp3)
+        except Exception as e:
+            log_to_file(f"Ошибка сохранения/конвертации для {base_name}: {e}")
+            continue
 
         # Проверка размера mp3 файла
         try:
@@ -413,7 +450,7 @@ def main():
                     json.dump(marker, mf)
                 log_to_file(f"B2: Успешно загружено {marker['zip']} (last_part={highest_part}). Маркер {B2_MARKER_FILE} создан.")
 
-                # --- 4) удаляем локальный zip чтобы runner не отправил его в артефакт по ошибке ---
+                # --- 4) Удаляем локальный zip чтобы runner не отправил его в артефакт по ошибке ---
                 try:
                     os.remove(zip_path)
                     log_to_file("Локальный zip удалён после успешной загрузки на B2.")
