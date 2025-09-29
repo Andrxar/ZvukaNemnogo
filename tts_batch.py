@@ -26,7 +26,7 @@ from bs4 import BeautifulSoup
 # ================== НАСТРОЙКИ ПОЛЬЗОВАТЕЛЯ ==================
 
 # Название исходного текстового файла (может быть .txt или .fb2)
-TEXT_FILE_NAME = "333Royzman_Delo-Volk-Vor-nevidimka.txt"
+TEXT_FILE_NAME = "Pinto_Sekretnye-missii-antologiya-_2_Ohotnik-za-shpionami.txt"
 
 # Папка для готовых mp3 файлов
 OUTPUT_MP3_DIR = "output_mp3"
@@ -39,10 +39,10 @@ MIN_SIZE_KB = 150
 MAX_SIZE_KB = 5000
 
 # Лимит общей папки mp3 перед сборкой zip (в МБ)
-AUDIO_SIZE_LIMIT_MB = 5
+AUDIO_SIZE_LIMIT_MB = 450
 
 # Частота дискретизации аудио при конвертации (Гц)
-SAMPLE_RATE_HZ = 22000
+SAMPLE_RATE_HZ = 24000
 
 # Битрейт MP3 при конвертации из WAV (например: "64k", "96k", "128k")
 MP3_BITRATE = "128k"
@@ -55,7 +55,7 @@ VIBES_DATA = {
 }
 
 # Выбранный голос и характер (можно менять на свой)
-VOICE_NAME = "Sage"
+VOICE_NAME = "Shimmer"
 VIBE_NAME = "Energetic (Энергичный)"
 
 # ----------------- ЛОГ-ФАЙЛЫ -----------------
