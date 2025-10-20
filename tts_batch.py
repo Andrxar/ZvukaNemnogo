@@ -27,7 +27,7 @@ from bs4 import BeautifulSoup
 # ================== НАСТРОЙКИ ПОЛЬЗОВАТЕЛЯ ==================
 
 # Название исходного текстового файла (может быть .txt или .fb2)
-TEXT_FILE_NAME = "Pinto_Sekretnye-missii-antologiya-_2_Ohotnik-za-shpionami.txt"
+TEXT_FILE_NAME = "Polyakov_Gipsovyy-trubach_3_Konec-filma-ili-Gipsovyy-truba.txt"
 
 # Папка для готовых mp3 файлов
 OUTPUT_MP3_DIR = "output_mp3"
@@ -56,8 +56,8 @@ VIBES_DATA = {
 }
 
 # Выбранный голос и характер (можно менять на свой)
-VOICE_NAME = "Shimmer"
-VIBE_NAME = "Energetic (Энергичный)"
+VOICE_NAME = "Verse"
+VIBE_NAME = "Calm (Спокойный)"
 
 # Параметры повторов (можно переопределить через окружение)
 DEFAULT_RETRY_ATTEMPTS = int(os.environ.get("RETRY_ATTEMPTS", "20"))
