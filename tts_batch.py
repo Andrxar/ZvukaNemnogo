@@ -27,7 +27,7 @@ from bs4 import BeautifulSoup
 # ================== НАСТРОЙКИ ПОЛЬЗОВАТЕЛЯ ==================
 
 # Название исходного текстового файла (может быть .txt или .fb2)
-TEXT_FILE_NAME = "Polyakov_Gipsovyy-trubach_3_Konec-filma-ili-Gipsovyy-truba.txt"
+TEXT_FILE_NAME = "Nadejdin_Jizn_Naoborot.txt"
 
 # Папка для готовых mp3 файлов
 OUTPUT_MP3_DIR = "output_mp3"
