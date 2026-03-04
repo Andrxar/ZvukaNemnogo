@@ -87,7 +87,7 @@ jobs:
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           rm -f mp3_results.zip || true
           rm -rf output_mp3 || true
-          git pull --rebase || true
+          git pull --rebase --autostash || true
           # Ищем наиболее свежий глобальный лог, соответствующий формату tts_batch(<bookname>).log
           LOG_FILE=$(ls -1t tts_batch\(*\).log 2>/dev/null | head -n1)
           if [ -z "$LOG_FILE" ]; then
