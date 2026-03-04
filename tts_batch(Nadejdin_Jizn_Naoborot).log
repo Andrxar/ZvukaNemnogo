@@ -597,3 +597,8 @@
 2026-03-04 08:00:28.343641 Список голосов пуст.
 2026-03-04 08:00:28.538579 Список языков пуст.
 2026-03-04 08:00:28.538678 Не выбран voice_id для freetts.ru
+2026-03-04 12:18:09.675226 Список голосов пуст.
+2026-03-04 12:18:09.675664 [FREETTS] env voice_id= fallback_voice_id= lang_code= fallback_lang_code= cookie_set=False token_set=False
+2026-03-04 12:18:09.838438 Список языков пуст.
+2026-03-04 12:18:09.838537 [FREETTS] env voice_id= fallback_voice_id= lang_code= fallback_lang_code= cookie_set=False token_set=False
+2026-03-04 12:18:09.838634 Не выбран voice_id для freetts.ru
