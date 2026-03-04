@@ -602,3 +602,101 @@
 2026-03-04 12:18:09.838438 Список языков пуст.
 2026-03-04 12:18:09.838537 [FREETTS] env voice_id= fallback_voice_id= lang_code= fallback_lang_code= cookie_set=False token_set=False
 2026-03-04 12:18:09.838634 Не выбран voice_id для freetts.ru
+2026-03-04 12:38:24.854082 Список голосов пуст.
+2026-03-04 12:38:24.854649 [FREETTS] env voice_id=None fallback_voice_id=VbNqRtKmLpOz lang_code=None fallback_lang_code=ru cookie_set=False token_set=False
+2026-03-04 12:38:25.078762 Список языков пуст.
+2026-03-04 12:38:25.078857 [FREETTS] env voice_id=None fallback_voice_id=VbNqRtKmLpOz lang_code=None fallback_lang_code=ru cookie_set=False token_set=False
+2026-03-04 12:38:25.078942 Выбран голос: Виталий (VbNqRtKmLpOz)
+2026-03-04 12:38:25.079023 Выбран язык: Русский (ru)
+2026-03-04 12:38:25.082130 Начало новой генерации (логов не найдено или нет успешных записей).
+2026-03-04 12:38:25.082245 [RETRY] Попытка 1/20 генерации аудио...
+2026-03-04 12:38:25.327441 [FREETTS] part_0001 status=error message=Ошибка 666
+2026-03-04 12:38:27.564313 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:38:29.962442 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:38:32.220381 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:38:34.451184 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:38:36.841577 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:38:39.060894 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:38:41.281099 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:38:44.027019 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:38:46.342988 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:38:48.677983 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:38:51.036956 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:38:53.258375 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:38:55.512584 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:38:57.746117 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:38:59.962592 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:39:02.273867 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:39:04.499549 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:39:06.799657 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:39:09.031541 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:39:11.340490 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:39:13.607932 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:39:15.829094 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:39:18.104691 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:39:20.359863 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:39:22.676378 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:39:24.930456 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:39:27.403175 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:39:29.618227 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:39:31.833102 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:39:34.065920 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:39:34.066093 [RETRY] Попытка 1 вернула некорректный Content-Type: None
+2026-03-04 12:39:34.066155 [RETRY] Ждём 10 секунд перед очередной попыткой...
+2026-03-04 12:39:44.076284 [RETRY] Попытка 2/20 генерации аудио...
+2026-03-04 12:39:44.352387 [FREETTS] part_0001 status=error message=Ошибка 666
+2026-03-04 12:39:46.605924 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:39:48.829193 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:39:51.090023 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:39:53.428452 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:39:55.693987 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:39:57.971225 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:40:00.215021 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:40:04.471434 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:40:07.078130 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:40:09.311202 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:40:11.826367 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:40:14.068833 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:40:16.285613 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:40:18.599121 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:40:20.854324 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:40:23.088715 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:40:25.318585 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:40:27.546730 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:40:29.761464 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:40:31.987689 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:40:34.298980 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:40:36.620577 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:40:38.862297 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:40:41.117887 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:40:43.397985 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:40:45.663256 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:40:47.956258 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:40:50.412354 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:40:52.692849 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:40:54.969247 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:40:54.969397 [RETRY] Попытка 2 вернула некорректный Content-Type: None
+2026-03-04 12:40:54.969447 [RETRY] Ждём 10 секунд перед очередной попыткой...
+2026-03-04 12:41:04.979578 [RETRY] Попытка 3/20 генерации аудио...
+2026-03-04 12:41:05.235328 [FREETTS] part_0001 status=error message=Ошибка 666
+2026-03-04 12:41:07.463863 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:41:09.840669 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:41:12.093031 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:41:14.405910 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:41:16.727667 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:41:18.954708 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:41:21.248164 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:41:23.734414 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:41:26.079461 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:41:28.391806 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:41:30.646444 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:41:32.870188 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:41:35.148248 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:41:37.361051 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:41:39.578217 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:41:41.864795 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:41:44.113461 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:41:46.421841 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:41:48.703653 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:41:51.061940 [FREETTS] part_0001 status=200 message=
+2026-03-04 12:41:53.359726 [FREETTS] part_0001 status=200 message=
